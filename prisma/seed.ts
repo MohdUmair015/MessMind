@@ -422,17 +422,31 @@ async function main() {
 
         console.log(`\n======================================================`);
         console.log(`🎯 TARGET SATURDAY DINNER PREDICTION PRODUCED:`);
-        console.log(`Eligible Population : ${predResult.breakdown.eligiblePopulation}`);
-        console.log(`Expected Diners     : ${predResult.expectedDiners}`);
-        console.log(`Recommended Servings: ${predResult.recommendedServings}`);
-        console.log(`Waste Risk          : ${predResult.wasteRisk}`);
-        console.log(`Confidence Level    : ${predResult.confidenceLevel}`);
-        console.log(`Confidence Basis    : ${predResult.confidenceReason}`);
-        console.log(`Historical Baseline : ${predResult.breakdown.historicalBaselineDiners}`);
-        console.log(`Preference Signal   : +${predResult.breakdown.preferenceSignalPercent}%`);
-        console.log(`Recent Trend Signal : +${predResult.breakdown.recentTrendPercent}%`);
-        console.log(`Menu Adjustment     : +${predResult.breakdown.menuAdjustmentPercent}%`);
-        console.log(`Comparable Meals    : ${predResult.breakdown.comparableMealsCount}`);
+        console.log(`Eligible Population       : ${predResult.breakdown.eligiblePopulation}`);
+        console.log(`Historical Baseline       : ${predResult.breakdown.historicalBaselineDiners} diners`);
+        console.log(`\n-- WEIGHTED BEHAVIORAL FACTORS (40/20/15/15/10) --`);
+        console.log(`Personal Historical Rate  : ${(predResult.breakdown.weightedFactors.personalHistoricalRate * 100).toFixed(1)}% (40% weight)`);
+        console.log(`Day-of-Week Pattern Rate  : ${(predResult.breakdown.weightedFactors.dayOfWeekPatternRate * 100).toFixed(1)}% (20% weight)`);
+        console.log(`Meal-Type Pattern Rate    : ${(predResult.breakdown.weightedFactors.mealTypePatternRate * 100).toFixed(1)}% (15% weight)`);
+        console.log(`Recent Attendance Trend   : ${(predResult.breakdown.weightedFactors.recentAttendanceTrendRate * 100).toFixed(1)}% (15% weight)`);
+        console.log(`Preference Intention Rate : ${(predResult.breakdown.weightedFactors.preferenceIntentionRate * 100).toFixed(1)}% (10% weight)`);
+        console.log(`\n-- BOUNDED ADJUSTMENTS (Clamped to ±10% max) --`);
+        console.log(`Menu Appeal Adjustment    : ${predResult.breakdown.boundedAdjustments.menuAdjustmentPercent > 0 ? "+" : ""}${predResult.breakdown.boundedAdjustments.menuAdjustmentPercent}%`);
+        console.log(`Macro Trend Drift         : ${predResult.breakdown.boundedAdjustments.macroTrendAdjustmentPercent > 0 ? "+" : ""}${predResult.breakdown.boundedAdjustments.macroTrendAdjustmentPercent}%`);
+        console.log(`\n-- PREDICTION & RECOMMENDATION --`);
+        console.log(`Expected Diners           : ${predResult.expectedDiners}`);
+        console.log(`Recommended Servings      : ${predResult.recommendedServings} (with 5% buffer)`);
+        console.log(`\n-- HISTORICAL OUTCOME WASTE-RISK EVIDENCE --`);
+        console.log(`Waste Risk Level          : ${predResult.wasteRisk}`);
+        console.log(`Historical Leftover Rate  : ${predResult.breakdown.wasteEvidence.averageLeftoverPercent}%`);
+        console.log(`Historical Food Waste Rate: ${predResult.breakdown.wasteEvidence.averageWastePercent}%`);
+        console.log(`Excess Leftover Frequency : ${predResult.breakdown.wasteEvidence.excessiveLeftoverFrequencyPercent}%`);
+        console.log(`Waste Reasoning           : ${predResult.breakdown.wasteEvidence.riskReasoning}`);
+        console.log(`\n-- CONFIDENCE CLASSIFICATION --`);
+        console.log(`Confidence Level          : ${predResult.confidenceLevel}`);
+        console.log(`Comparable Meals Evaluated: ${predResult.breakdown.confidenceMetrics.comparableMealsCount}`);
+        console.log(`Calculated Attendance CV  : ${(predResult.breakdown.confidenceMetrics.calculatedCoefficientOfVariation * 100).toFixed(1)}%`);
+        console.log(`Confidence Basis          : ${predResult.confidenceReason}`);
         console.log(`======================================================\n`);
       }
     }

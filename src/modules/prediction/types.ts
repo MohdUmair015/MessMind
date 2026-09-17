@@ -25,6 +25,34 @@ export interface PredictionCalculationInput {
   bufferPercentage?: number;
 }
 
+export interface WeightedFactorsBreakdown {
+  personalHistoricalRate: number;     // 40% weight
+  dayOfWeekPatternRate: number;       // 20% weight
+  mealTypePatternRate: number;        // 15% weight
+  recentAttendanceTrendRate: number;  // 15% weight
+  preferenceIntentionRate: number;    // 10% weight (intention signal)
+}
+
+export interface BoundedAdjustmentsBreakdown {
+  menuAdjustmentPercent: number;      // Clamped to ±10% max
+  macroTrendAdjustmentPercent: number;// Clamped to ±10% max
+}
+
+export interface HistoricalWasteEvidence {
+  evaluatedOutcomesCount: number;
+  averageLeftoverPercent: number;
+  averageWastePercent: number;
+  excessiveLeftoverFrequencyPercent: number;
+  riskReasoning: string;
+}
+
+export interface ConfidenceMetrics {
+  comparableMealsCount: number;
+  calculatedCoefficientOfVariation: number;
+  attendanceMean: number;
+  attendanceStdDev: number;
+}
+
 export interface PredictionCalculationResult {
   mealId: string;
   expectedDiners: number;
@@ -36,12 +64,10 @@ export interface PredictionCalculationResult {
   breakdown: {
     eligiblePopulation: number;
     historicalBaselineDiners: number;
-    dayOfWeekEffectPercent: number;
-    mealTypeEffectPercent: number;
-    recentTrendPercent: number;
-    preferenceSignalPercent: number;
-    menuAdjustmentPercent: number;
-    comparableMealsCount: number;
+    weightedFactors: WeightedFactorsBreakdown;
+    boundedAdjustments: BoundedAdjustmentsBreakdown;
+    wasteEvidence: HistoricalWasteEvidence;
+    confidenceMetrics: ConfidenceMetrics;
   };
   individualProbabilities: ResidentAttendanceProbability[];
   algorithmVersion: string;
@@ -69,4 +95,7 @@ export interface ComparableMealMetric {
   mealType: MealType;
   menuId: string;
   totalActualDiners: number;
+  preparedServings?: number;
+  remainingServings?: number;
+  wastedServings?: number;
 }

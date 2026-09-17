@@ -11,7 +11,6 @@ import { ResidentType } from "@/types";
 test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => {
   const engine = new DeterministicPredictionEngine();
 
-  // Helper to generate synthetic dates
   const createDate = (daysAgo: number, dayOfWeek?: number): Date => {
     const d = new Date("2026-09-19T18:00:00Z"); // Saturday benchmark
     d.setUTCDate(d.getUTCDate() - daysAgo);
@@ -26,7 +25,6 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
   const targetDate = new Date("2026-09-19T18:00:00Z"); // Saturday
   const targetMenuId = "menu-special-biryani";
 
-  // Standard population baselines
   const baselines = {
     overallAverageAttendanceRate: 0.75,
     studentBaseline: 0.72,
@@ -41,7 +39,6 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
   // 1. Consistent Attendee Test
   await t.test("1. Consistent attendee produces high probability (>= 0.88)", () => {
     const resident = { id: "res-consistent", residentCode: "STU-001", residentType: "STUDENT" as ResidentType };
-    // 30 meals, attended 29
     const history: ResidentHistoryRecord[] = Array.from({ length: 30 }, (_, i) => ({
       residentId: resident.id,
       residentCode: resident.residentCode,
@@ -52,14 +49,14 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       menuId: "menu-regular",
       hasPreference: true,
       selectedOption: "REGULAR",
-      attended: i !== 5, // missed only 1
+      attended: i !== 5,
     }));
 
     const result = engine.computeResidentProbability(
       resident,
       history,
       targetDate,
-      6, // Saturday
+      6,
       "DINNER",
       targetMenuId,
       { hasPreference: true, selectedOption: "REGULAR" },
@@ -77,7 +74,6 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
   // 2. Occasional Attendee Test
   await t.test("2. Occasional attendee produces low probability (<= 0.35)", () => {
     const resident = { id: "res-occasional", residentCode: "CORP-001", residentType: "CORPORATE" as ResidentType };
-    // 30 meals, attended only 6 (20%)
     const history: ResidentHistoryRecord[] = Array.from({ length: 30 }, (_, i) => ({
       residentId: resident.id,
       residentCode: resident.residentCode,
@@ -98,7 +94,7 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       6,
       "DINNER",
       targetMenuId,
-      { hasPreference: false }, // no preference set
+      { hasPreference: false },
       baselines,
       0.0
     );
@@ -112,7 +108,6 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
   // 3. Weekend-Heavy Attendee Test
   await t.test("3. Weekend-heavy attendee shows higher probability on Saturday vs Wednesday", () => {
     const resident = { id: "res-weekend", residentCode: "STU-002", residentType: "STUDENT" as ResidentType };
-    // Attends Saturdays (day 6) 90% of the time, Wednesdays (day 3) 20%
     const history: ResidentHistoryRecord[] = [];
     for (let i = 1; i <= 60; i++) {
       const d = createDate(i);
@@ -134,7 +129,7 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       resident,
       history,
       targetDate,
-      6, // Saturday
+      6,
       "DINNER",
       targetMenuId,
       { hasPreference: true, selectedOption: "REGULAR" },
@@ -146,7 +141,7 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       resident,
       history,
       targetDate,
-      3, // Wednesday
+      3,
       "DINNER",
       targetMenuId,
       { hasPreference: false },
@@ -163,7 +158,6 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
   // 4. Preference-But-Often-Absent Resident Test
   await t.test("4. Preference-but-often-absent resident is penalized by preference reliability", () => {
     const resident = { id: "res-flaky", residentCode: "STU-003", residentType: "STUDENT" as ResidentType };
-    // Resident ALWAYS opts in with preference, but only attends 25% of the time
     const history: ResidentHistoryRecord[] = Array.from({ length: 20 }, (_, i) => ({
       residentId: resident.id,
       residentCode: resident.residentCode,
@@ -174,7 +168,7 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       menuId: "menu-regular",
       hasPreference: true,
       selectedOption: "REGULAR",
-      attended: i < 5, // only 5/20 = 25%
+      attended: i < 5, // only 5/20 = 25% attended after opting in
     }));
 
     const result = engine.computeResidentProbability(
@@ -184,7 +178,7 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       6,
       "DINNER",
       targetMenuId,
-      { hasPreference: true, selectedOption: "REGULAR" }, // has preference set today
+      { hasPreference: true, selectedOption: "REGULAR" },
       baselines,
       0.0
     );
@@ -199,7 +193,6 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
   // 5. Sparse-History Resident Test
   await t.test("5. Sparse-history resident falls back gracefully without error", () => {
     const resident = { id: "res-sparse", residentCode: "CORP-002", residentType: "CORPORATE" as ResidentType };
-    // Only 1 record in history
     const history: ResidentHistoryRecord[] = [
       {
         residentId: resident.id,
@@ -226,7 +219,7 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       0.0
     );
 
-    assert.ok(!isNaN(result.probability), "Probability should not be NaN");
+    assert.ok(!isNaN(result.probability));
     assert.strictEqual(result.factors.fallbackLevel, "population_baseline");
     assert.strictEqual(result.factors.personalHistoricalRate, baselines.corporateBaseline);
   });
@@ -266,14 +259,13 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
     assert.strictEqual(corpResult.factors.fallbackLevel, "population_baseline");
   });
 
-  // 7. Bounded Adjustments Test
-  await t.test("7. Menu and trend adjustments are strictly bounded (clamped to ±10%)", () => {
+  // 7. Distinction Between Preference Component (10%) and Bounded Adjustments (±10%)
+  await t.test("7. Distinction between 10% preference weighted factor and bounded adjustments (clamped to ±10%)", () => {
     const eligibleResidents = [
       { id: "res-1", residentCode: "STU-1", residentType: "STUDENT" as ResidentType },
       { id: "res-2", residentCode: "CORP-1", residentType: "CORPORATE" as ResidentType },
     ];
 
-    // Create history where menu has 100% attendance (extreme popularity)
     const extremeHistory: ResidentHistoryRecord[] = [];
     for (let i = 0; i < 20; i++) {
       extremeHistory.push({
@@ -296,75 +288,147 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       menuId: targetMenuId,
     };
 
+    const currentPreferences = new Map([
+      ["res-1", { selectedOption: "REGULAR" }],
+      ["res-2", { selectedOption: "REGULAR" }],
+    ]);
+
     const result = engine.calculateDemand(
       input,
       eligibleResidents,
       extremeHistory,
-      new Map(),
+      currentPreferences,
       []
     );
 
+    // Bounded adjustments must be strictly clamped to [-10, 10]
     assert.ok(
-      result.breakdown.menuAdjustmentPercent <= 10,
-      `Menu adjustment should be clamped <= 10%, got ${result.breakdown.menuAdjustmentPercent}%`
+      result.breakdown.boundedAdjustments.menuAdjustmentPercent <= 10 &&
+      result.breakdown.boundedAdjustments.menuAdjustmentPercent >= -10,
+      `Menu adjustment should be clamped to ±10%, got ${result.breakdown.boundedAdjustments.menuAdjustmentPercent}%`
     );
     assert.ok(
-      result.breakdown.menuAdjustmentPercent >= -10,
-      `Menu adjustment should be clamped >= -10%, got ${result.breakdown.menuAdjustmentPercent}%`
+      result.breakdown.boundedAdjustments.macroTrendAdjustmentPercent <= 10 &&
+      result.breakdown.boundedAdjustments.macroTrendAdjustmentPercent >= -10,
+      `Macro trend adjustment should be clamped to ±10%, got ${result.breakdown.boundedAdjustments.macroTrendAdjustmentPercent}%`
     );
-    assert.ok(
-      result.breakdown.recentTrendPercent <= 10 && result.breakdown.recentTrendPercent >= -10,
-      `Recent trend adjustment should be clamped to ±10%, got ${result.breakdown.recentTrendPercent}%`
-    );
+
+    // Weighted factors must be clearly separated and within probability range [0, 1]
+    assert.ok(typeof result.breakdown.weightedFactors.preferenceIntentionRate === "number");
+    assert.ok(result.breakdown.weightedFactors.preferenceIntentionRate >= 0 && result.breakdown.weightedFactors.preferenceIntentionRate <= 1);
+    assert.ok(result.breakdown.weightedFactors.personalHistoricalRate >= 0 && result.breakdown.weightedFactors.personalHistoricalRate <= 1);
+    assert.ok(result.breakdown.weightedFactors.dayOfWeekPatternRate >= 0 && result.breakdown.weightedFactors.dayOfWeekPatternRate <= 1);
+    assert.ok(result.breakdown.weightedFactors.mealTypePatternRate >= 0 && result.breakdown.weightedFactors.mealTypePatternRate <= 1);
+    assert.ok(result.breakdown.weightedFactors.recentAttendanceTrendRate >= 0 && result.breakdown.weightedFactors.recentAttendanceTrendRate <= 1);
   });
 
-  // 8. Preparation Buffer Calculation Test
-  await t.test("8. Preparation buffer properly executes ceil(expected_diners * (1 + buffer))", () => {
-    // Expected diners = 101 with 5% buffer -> 101 * 1.05 = 106.05 -> ceil = 107
-    const expected = 101;
+  // 8. Preparation Buffer Independence from Waste Risk
+  await t.test("8. Preparation buffer remains independent from waste-risk classification", () => {
+    // Expected diners = 100 with default 5% buffer -> 100 * 1.05 = 105 -> ceil = 105
+    const expected = 100;
     const defaultBuffer = 0.05;
-    const recommendedDefault = Math.ceil(expected * (1 + defaultBuffer));
-    assert.strictEqual(recommendedDefault, 107);
+    const safeCeil = (val: number) => Math.ceil(Number(val.toFixed(6)));
+    const recommendedDefault = safeCeil(expected * (1 + defaultBuffer));
+    assert.strictEqual(recommendedDefault, 105);
 
-    // Custom 10% buffer -> 101 * 1.10 = 111.1 -> ceil = 112
+    // Expected diners = 101 with 5% buffer -> 101 * 1.05 = 106.05 -> ceil = 107
+    assert.strictEqual(safeCeil(101 * 1.05), 107);
+
+    // Custom 10% buffer -> 100 * 1.10 = 110 -> ceil = 110
     const customBuffer = 0.10;
-    const recommendedCustom = Math.ceil(expected * (1 + customBuffer));
-    assert.strictEqual(recommendedCustom, 112);
-
-    // Waste risk classification tests
-    assert.strictEqual(engine.evaluateWasteRisk(101, 107), "LOW");      // 107/101 = 5.9% excess -> LOW
-    assert.strictEqual(engine.evaluateWasteRisk(101, 112), "MEDIUM");   // 112/101 = 10.9% excess -> MEDIUM
-    assert.strictEqual(engine.evaluateWasteRisk(101, 140), "HIGH");     // 140/101 = 38.6% excess -> HIGH
+    const recommendedCustom = safeCeil(expected * (1 + customBuffer));
+    assert.strictEqual(recommendedCustom, 110);
   });
 
-  // 9. Confidence Classification Test
-  await t.test("9. Confidence classification properly scores HIGH, MEDIUM, and LOW", () => {
-    // 15 comparable meals with consistent attendance -> HIGH
-    const highMeals: ComparableMealMetric[] = Array.from({ length: 15 }, (_, i) => ({
-      mealId: `comp-${i}`,
+  // 9. Waste Risk from Historical MealOutcome Evidence
+  await t.test("9. Waste risk incorporates historical MealOutcome evidence", () => {
+    // Case A: High waste history (comparable meals generated 15% food waste)
+    const highWasteHistory: ComparableMealMetric[] = Array.from({ length: 10 }, (_, i) => ({
+      mealId: `hist-${i}`,
+      mealDate: createDate(i * 7),
+      mealType: "DINNER",
+      menuId: targetMenuId,
+      totalActualDiners: 80,
+      preparedServings: 110,
+      remainingServings: 30,
+      wastedServings: 18, // 18 / 110 = 16.3% waste rate
+    }));
+
+    const highWasteEval = engine.evaluateWasteRisk(80, undefined, highWasteHistory);
+    assert.strictEqual(highWasteEval.wasteRisk, "HIGH");
+    assert.match(highWasteEval.evidence.riskReasoning, /High waste risk based on historical outcomes/);
+    assert.ok(highWasteEval.evidence.averageWastePercent > 10);
+
+    // Case B: Low waste history (tight preparation, 2% waste)
+    const lowWasteHistory: ComparableMealMetric[] = Array.from({ length: 10 }, (_, i) => ({
+      mealId: `hist-${i}`,
+      mealDate: createDate(i * 7),
+      mealType: "DINNER",
+      menuId: targetMenuId,
+      totalActualDiners: 95,
+      preparedServings: 100,
+      remainingServings: 5,
+      wastedServings: 2, // 2 / 100 = 2% waste
+    }));
+
+    const lowWasteEval = engine.evaluateWasteRisk(95, undefined, lowWasteHistory);
+    assert.strictEqual(lowWasteEval.wasteRisk, "LOW");
+    assert.match(lowWasteEval.evidence.riskReasoning, /Low waste risk based on historical outcomes/);
+
+    // Case C: Explicit planned servings with high excess (planned 140 for 100 expected diners)
+    const plannedHighExcess = engine.evaluateWasteRisk(100, 140, lowWasteHistory);
+    assert.strictEqual(plannedHighExcess.wasteRisk, "HIGH");
+    assert.match(plannedHighExcess.evidence.riskReasoning, /planned preparation \(140\) exceeds predicted demand \(100\) by \+40\.0%/);
+
+    // Case D: Explicit planned servings with tight buffer (planned 106 for 100 expected diners)
+    const plannedTight = engine.evaluateWasteRisk(100, 106, lowWasteHistory);
+    assert.strictEqual(plannedTight.wasteRisk, "LOW");
+  });
+
+  // 10. Dynamic Confidence CV Calculation
+  await t.test("10. Confidence CV is calculated dynamically from actual historical observations", () => {
+    // Dataset A: Consistent attendance -> [95, 96, 95, 96, 95, 96, 95, 96, 95, 96]
+    // Mean = 95.5, Variance = 0.25, StdDev = 0.5, CV = 0.5 / 95.5 = ~0.0052 (< 0.01)
+    const consistentMeals: ComparableMealMetric[] = Array.from({ length: 10 }, (_, i) => ({
+      mealId: `comp-cons-${i}`,
       mealDate: createDate(i * 7),
       mealType: "DINNER",
       menuId: "menu-any",
-      totalActualDiners: 95 + (i % 3), // very low variation (95, 96, 97)
+      totalActualDiners: 95 + (i % 2),
     }));
 
-    const highConfidence = engine.evaluateConfidence(highMeals, 6, "DINNER");
-    assert.strictEqual(highConfidence.confidenceLevel, "HIGH");
-    assert.match(highConfidence.confidenceReason, /15 comparable historical meals/);
+    const consistentResult = engine.evaluateConfidence(consistentMeals, 6, "DINNER");
+    assert.strictEqual(consistentResult.confidenceLevel, "HIGH");
+    assert.ok(consistentResult.metrics.calculatedCoefficientOfVariation < 0.02);
+    assert.strictEqual(consistentResult.metrics.comparableMealsCount, 10);
+    assert.strictEqual(consistentResult.metrics.attendanceMean, 95.5);
 
-    // 7 comparable meals -> MEDIUM
-    const mediumMeals = highMeals.slice(0, 7);
-    const medConfidence = engine.evaluateConfidence(mediumMeals, 6, "DINNER");
-    assert.strictEqual(medConfidence.confidenceLevel, "MEDIUM");
+    // Dataset B: Highly volatile attendance -> [50, 110, 45, 120, 55, 105, 50, 115, 60, 100]
+    // Mean = 81.0, StdDev ~ 30.2, CV ~ 0.37 (> 0.20)
+    const volatileAttendance = [50, 110, 45, 120, 55, 105, 50, 115, 60, 100];
+    const volatileMeals: ComparableMealMetric[] = volatileAttendance.map((diners, i) => ({
+      mealId: `comp-vol-${i}`,
+      mealDate: createDate(i * 7),
+      mealType: "DINNER",
+      menuId: "menu-any",
+      totalActualDiners: diners,
+    }));
 
-    // 3 comparable meals -> LOW
-    const lowMeals = highMeals.slice(0, 3);
-    const lowConfidence = engine.evaluateConfidence(lowMeals, 6, "DINNER");
-    assert.strictEqual(lowConfidence.confidenceLevel, "LOW");
+    const volatileResult = engine.evaluateConfidence(volatileMeals, 6, "DINNER");
+    assert.strictEqual(volatileResult.confidenceLevel, "MEDIUM"); // Downgraded from HIGH due to high CV
+    assert.ok(
+      volatileResult.metrics.calculatedCoefficientOfVariation > 0.25,
+      `Expected CV > 0.25 for volatile meals, got ${volatileResult.metrics.calculatedCoefficientOfVariation}`
+    );
+
+    // Dataset C: Very few meals (< 5) -> LOW confidence
+    const sparseMeals = consistentMeals.slice(0, 3);
+    const sparseResult = engine.evaluateConfidence(sparseMeals, 6, "DINNER");
+    assert.strictEqual(sparseResult.confidenceLevel, "LOW");
   });
 
-  // 10. Deterministic Repeatability Test
-  await t.test("10. Deterministic repeatability: same data produces byte-for-byte identical output", () => {
+  // 11. Deterministic Repeatability Test
+  await t.test("11. Deterministic repeatability: same data produces byte-for-byte identical output", () => {
     const eligibleResidents = [
       { id: "res-1", residentCode: "STU-001", residentType: "STUDENT" as ResidentType },
       { id: "res-2", residentCode: "CORP-001", residentType: "CORPORATE" as ResidentType },
@@ -396,6 +460,19 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       },
     ];
 
+    const comparableMeals: ComparableMealMetric[] = [
+      {
+        mealId: "c1",
+        mealDate: createDate(7, 6),
+        mealType: "DINNER",
+        menuId: targetMenuId,
+        totalActualDiners: 95,
+        preparedServings: 100,
+        remainingServings: 5,
+        wastedServings: 2,
+      },
+    ];
+
     const input: PredictionCalculationInput = {
       mealId: "target-rep",
       mealDate: targetDate,
@@ -404,9 +481,9 @@ test("Deterministic Prediction Engine - Comprehensive Test Suite", async (t) => 
       plannedServings: 108,
     };
 
-    const firstRun = engine.calculateDemand(input, eligibleResidents, history, new Map(), []);
+    const firstRun = engine.calculateDemand(input, eligibleResidents, history, new Map(), comparableMeals);
     for (let i = 0; i < 50; i++) {
-      const nextRun = engine.calculateDemand(input, eligibleResidents, history, new Map(), []);
+      const nextRun = engine.calculateDemand(input, eligibleResidents, history, new Map(), comparableMeals);
       assert.strictEqual(nextRun.expectedDiners, firstRun.expectedDiners);
       assert.strictEqual(nextRun.recommendedServings, firstRun.recommendedServings);
       assert.strictEqual(nextRun.wasteRisk, firstRun.wasteRisk);

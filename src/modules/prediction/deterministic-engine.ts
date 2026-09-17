@@ -10,29 +10,39 @@ import {
   ResidentAttendanceProbability,
   ResidentHistoryRecord,
   ComparableMealMetric,
+  HistoricalWasteEvidence,
+  ConfidenceMetrics,
 } from "./types";
 import { IPredictionEngine } from "./prediction-engine.interface";
 
 export class DeterministicPredictionEngine implements IPredictionEngine {
-  private readonly algorithmVersion = "v1.0-deterministic";
+  public readonly algorithmVersion = "v1.1-deterministic";
 
   /**
-   * Weights defined in specification:
-   * Personal historical behavior: 40%
-   * Day-of-week pattern:          20%
-   * Meal-type pattern:            15%
-   * Recent attendance trend:      15%
-   * Current preference behavior:  10%
+   * Five Weighted Behavioral Components (Sum = 100%):
+   * 1. Personal historical behavior: 40% (0.40)
+   * 2. Day-of-week pattern:          20% (0.20)
+   * 3. Meal-type pattern:            15% (0.15)
+   * 4. Recent attendance trend:      15% (0.15)
+   * 5. Current preference behavior:  10% (0.10) - intention signal
    */
-  private readonly WEIGHT_PERSONAL_HIST = 0.40;
-  private readonly WEIGHT_DAY_OF_WEEK = 0.20;
-  private readonly WEIGHT_MEAL_TYPE = 0.15;
-  private readonly WEIGHT_RECENT_TREND = 0.15;
-  private readonly WEIGHT_CURRENT_PREF = 0.10;
+  public readonly WEIGHT_PERSONAL_HIST = 0.40;
+  public readonly WEIGHT_DAY_OF_WEEK = 0.20;
+  public readonly WEIGHT_MEAL_TYPE = 0.15;
+  public readonly WEIGHT_RECENT_TREND = 0.15;
+  public readonly WEIGHT_CURRENT_PREF = 0.10;
 
-  private readonly MAX_MENU_ADJUSTMENT = 0.10;   // ±10% bounded adjustment
-  private readonly MAX_TREND_ADJUSTMENT = 0.10;  // ±10% bounded adjustment
-  private readonly DEFAULT_BUFFER_PERCENT = 5.0; // 5% configurable buffer
+  /**
+   * Bounded Adjustments (Separate from weighted probability components, strictly clamped to ±10%):
+   */
+  public readonly MAX_MENU_ADJUSTMENT = 0.10;   // ±10% bounded adjustment
+  public readonly MAX_TREND_ADJUSTMENT = 0.10;  // ±10% bounded adjustment
+
+  /**
+   * Configurable Preparation Buffer (Default 5%):
+   * recommended_servings = ceil(expected_diners * (1 + buffer))
+   */
+  public readonly DEFAULT_BUFFER_PERCENT = 5.0;
 
   /**
    * Pure deterministic calculation from in-memory records.
@@ -63,7 +73,7 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
       populationBaselines.overallAverageAttendanceRate
     );
 
-    // 3. Compute Per-Resident Attendance Probability
+    // 3. Compute Per-Resident Attendance Probability (combining 5 weighted factors + bounded menu adjustment)
     const individualProbabilities: ResidentAttendanceProbability[] = eligibleResidents.map((resident) => {
       const residentHistory = historyRecords.filter((h) => h.residentId === resident.id);
       const preference = currentMealPreferences.get(resident.id);
@@ -86,30 +96,40 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
     const expectedDiners = Math.round(rawExpectedDiners);
 
     // 5. Recommended Servings = ceil(expected_diners * (1 + buffer))
-    const recommendedServings = Math.ceil(expectedDiners * (1 + buffer));
+    // Clean precision to avoid IEEE 754 floating point epsilon errors (e.g. 100 * 1.1 = 110.00000000000001)
+    const rawRecommended = expectedDiners * (1 + buffer);
+    const recommendedServings = Math.ceil(Number(rawRecommended.toFixed(6)));
 
-    // 6. Confidence Level & Basis
-    const { confidenceLevel, confidenceReason } = this.evaluateConfidence(
+    // 6. Confidence Level & Basis (Calculated dynamically from historical attendance observations)
+    const { confidenceLevel, confidenceReason, metrics: confidenceMetrics } = this.evaluateConfidence(
       comparableHistoricalMeals,
       targetDayOfWeek,
       targetMealType
     );
 
-    // 7. Waste Risk
+    // 7. Waste Risk evaluated from historical MealOutcome evidence
     const planned = input.plannedServings;
-    const wasteRisk = this.evaluateWasteRisk(expectedDiners, planned ?? recommendedServings);
-
-    // 8. Structured Prediction Factors for Manager UI & Gemini
-    const historicalBaselineDiners = Math.round(populationBaselines.dayMealAverageAttendanceRate * eligibleResidents.length);
-    const recentTrendPercent = Math.round(
-      individualProbabilities.reduce((acc, p) => acc + (p.factors.recentTrendRate - p.factors.personalHistoricalRate), 0) /
-        (eligibleResidents.length || 1) * 100
+    const { wasteRisk, evidence: wasteEvidence } = this.evaluateWasteRisk(
+      expectedDiners,
+      planned,
+      comparableHistoricalMeals
     );
 
-    const preferenceCount = currentMealPreferences.size;
-    const preferenceSignalPercent = preferenceCount > 0
-      ? Math.round(((preferenceCount / eligibleResidents.length) - populationBaselines.dayMealAverageAttendanceRate) * 100)
-      : 0;
+    // 8. Distinct breakdown separating:
+    // (a) Weighted Behavioral Factors (averages across population)
+    // (b) Bounded Adjustments (clamped to ±10%)
+    // (c) Historical Waste Evidence
+    // (d) Confidence Metrics
+    const totalResidents = eligibleResidents.length || 1;
+    const avgPersonalRate = individualProbabilities.reduce((acc, p) => acc + p.factors.personalHistoricalRate, 0) / totalResidents;
+    const avgDayRate = individualProbabilities.reduce((acc, p) => acc + p.factors.dayOfWeekRate, 0) / totalResidents;
+    const avgMealRate = individualProbabilities.reduce((acc, p) => acc + p.factors.mealTypeRate, 0) / totalResidents;
+    const avgRecentRate = individualProbabilities.reduce((acc, p) => acc + p.factors.recentTrendRate, 0) / totalResidents;
+    const avgPrefRate = individualProbabilities.reduce((acc, p) => acc + p.factors.preferenceSignalRate, 0) / totalResidents;
+
+    const macroTrendDelta = Math.max(-this.MAX_TREND_ADJUSTMENT, Math.min(this.MAX_TREND_ADJUSTMENT, avgRecentRate - avgPersonalRate));
+
+    const historicalBaselineDiners = Math.round(populationBaselines.dayMealAverageAttendanceRate * eligibleResidents.length);
 
     return {
       mealId: input.mealId,
@@ -122,12 +142,19 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
       breakdown: {
         eligiblePopulation: eligibleResidents.length,
         historicalBaselineDiners,
-        dayOfWeekEffectPercent: Math.round((populationBaselines.dayAverageAttendanceRate - populationBaselines.overallAverageAttendanceRate) * 100),
-        mealTypeEffectPercent: Math.round((populationBaselines.mealTypeAverageAttendanceRate - populationBaselines.overallAverageAttendanceRate) * 100),
-        recentTrendPercent: Math.max(-10, Math.min(10, recentTrendPercent)),
-        preferenceSignalPercent: Math.max(-15, Math.min(15, preferenceSignalPercent)),
-        menuAdjustmentPercent: Math.round(menuAdjustment * 100),
-        comparableMealsCount: comparableHistoricalMeals.length,
+        weightedFactors: {
+          personalHistoricalRate: Math.round(avgPersonalRate * 100) / 100,
+          dayOfWeekPatternRate: Math.round(avgDayRate * 100) / 100,
+          mealTypePatternRate: Math.round(avgMealRate * 100) / 100,
+          recentAttendanceTrendRate: Math.round(avgRecentRate * 100) / 100,
+          preferenceIntentionRate: Math.round(avgPrefRate * 100) / 100,
+        },
+        boundedAdjustments: {
+          menuAdjustmentPercent: Math.round(menuAdjustment * 100),
+          macroTrendAdjustmentPercent: Math.round(macroTrendDelta * 100),
+        },
+        wasteEvidence,
+        confidenceMetrics,
       },
       individualProbabilities,
       algorithmVersion: this.algorithmVersion,
@@ -161,7 +188,7 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
 
     let fallbackLevel: 'resident_full' | 'resident_day_meal' | 'resident_meal' | 'population_baseline' = 'population_baseline';
 
-    // 1. Personal Historical Attendance (40%)
+    // 1. Personal Historical Attendance (40% Weight)
     let personalHistRate = cohortBaseline;
     if (history.length >= 3) {
       const attendedCount = history.filter((h) => h.attended).length;
@@ -169,7 +196,7 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
       fallbackLevel = 'resident_meal';
     }
 
-    // 2. Day-of-Week Pattern (20%)
+    // 2. Day-of-Week Pattern (20% Weight)
     const dayRecords = history.filter((h) => h.mealDate.getDay() === targetDayOfWeek);
     let dayOfWeekRate = personalHistRate;
     if (dayRecords.length >= 2) {
@@ -178,7 +205,7 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
       fallbackLevel = 'resident_day_meal';
     }
 
-    // 3. Meal-Type Pattern (15%)
+    // 3. Meal-Type Pattern (15% Weight)
     const mealTypeRecords = history.filter((h) => h.mealType === targetMealType);
     let mealTypeRate = personalHistRate;
     if (mealTypeRecords.length >= 2) {
@@ -186,26 +213,26 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
       mealTypeRate = mealTypeAttended / mealTypeRecords.length;
     }
 
-    // Menu specific history for resident
+    // Menu specific history for resident (if abundant)
     const menuRecords = history.filter((h) => h.menuId === targetMenuId);
     if (menuRecords.length >= 2 && dayRecords.length >= 2) {
       fallbackLevel = 'resident_full';
     }
 
-    // 4. Recent Attendance Trend (15%) - Last 14 days
+    // 4. Recent Attendance Trend (15% Weight) - Last 14 days with bounded trend delta
     const fourteenDaysAgo = new Date(targetDate.getTime() - 14 * 24 * 60 * 60 * 1000);
     const recentRecords = history.filter((h) => h.mealDate >= fourteenDaysAgo);
     let recentTrendRate = personalHistRate;
     if (recentRecords.length >= 2) {
       const recentAttended = recentRecords.filter((h) => h.attended).length;
       const rawRecentRate = recentAttended / recentRecords.length;
-      // Bounded trend adjustment: ±10% from baseline
+      // Bounded personal trend delta: ±10% from personal baseline
       const trendDelta = Math.max(-this.MAX_TREND_ADJUSTMENT, Math.min(this.MAX_TREND_ADJUSTMENT, rawRecentRate - personalHistRate));
       recentTrendRate = Math.max(0, Math.min(1, personalHistRate + trendDelta));
     }
 
-    // 5. Current Preference Behavior (10%)
-    // Preference is an intention signal. Evaluate historical preference reliability.
+    // 5. Current Preference Behavior (10% Weight - Intention Signal)
+    // Preference is an intention signal. Learn how reliable resident's preference is historically.
     const cohortReliability = resident.residentType === "STUDENT"
       ? populationBaselines.studentPrefReliability
       : populationBaselines.corporatePrefReliability;
@@ -227,11 +254,11 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
         const noPrefAttended = noPrefHistory.filter((h) => h.attended).length;
         preferenceSignalRate = noPrefAttended / noPrefHistory.length;
       } else {
-        preferenceSignalRate = cohortBaseline * 0.25; // Default low probability for no preference
+        preferenceSignalRate = cohortBaseline * 0.25; // Default low probability for unannounced walk-in
       }
     }
 
-    // Weighted raw probability
+    // Weighted raw probability from the 5 components (40/20/15/15/10)
     const rawWeighted =
       this.WEIGHT_PERSONAL_HIST * personalHistRate +
       this.WEIGHT_DAY_OF_WEEK * dayOfWeekRate +
@@ -239,7 +266,7 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
       this.WEIGHT_RECENT_TREND * recentTrendRate +
       this.WEIGHT_CURRENT_PREF * preferenceSignalRate;
 
-    // Apply bounded menu adjustment (±10%)
+    // Apply bounded menu adjustment (±10% max)
     const finalProbability = Math.max(0.01, Math.min(0.99, rawWeighted * (1 + menuAdjustment)));
 
     return {
@@ -271,13 +298,12 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
   ): number {
     const menuRecords = history.filter((h) => h.menuId === targetMenuId);
     if (menuRecords.length < 5) {
-      return 0.0; // Sparse data fallback: no menu adjustment for new/infrequent menu
+      return 0.0; // Sparse data fallback: no adjustment for new/infrequent menu
     }
 
     const menuAttended = menuRecords.filter((h) => h.attended).length;
     const menuRate = menuAttended / menuRecords.length;
 
-    // Day/Meal baseline
     const comparableRecords = history.filter(
       (h) => h.mealDate.getDay() === targetDayOfWeek && h.mealType === targetMealType
     );
@@ -302,31 +328,26 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
     const overallAttended = history.filter((h) => h.attended).length;
     const overallAverageAttendanceRate = history.length > 0 ? overallAttended / history.length : 0.75;
 
-    // Student baseline
     const studentHistory = history.filter((h) => h.residentType === "STUDENT");
     const studentBaseline = studentHistory.length > 0
       ? studentHistory.filter((h) => h.attended).length / studentHistory.length
       : 0.72;
 
-    // Corporate baseline
     const corporateHistory = history.filter((h) => h.residentType === "CORPORATE");
     const corporateBaseline = corporateHistory.length > 0
       ? corporateHistory.filter((h) => h.attended).length / corporateHistory.length
       : 0.78;
 
-    // Day average
     const dayHistory = history.filter((h) => h.mealDate.getDay() === targetDayOfWeek);
     const dayAverageAttendanceRate = dayHistory.length > 0
       ? dayHistory.filter((h) => h.attended).length / dayHistory.length
       : overallAverageAttendanceRate;
 
-    // Meal type average
     const mealHistory = history.filter((h) => h.mealType === targetMealType);
     const mealTypeAverageAttendanceRate = mealHistory.length > 0
       ? mealHistory.filter((h) => h.attended).length / mealHistory.length
       : overallAverageAttendanceRate;
 
-    // Day + Meal average
     const dayMealHistory = history.filter(
       (h) => h.mealDate.getDay() === targetDayOfWeek && h.mealType === targetMealType
     );
@@ -334,13 +355,11 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
       ? dayMealHistory.filter((h) => h.attended).length / dayMealHistory.length
       : overallAverageAttendanceRate;
 
-    // Student Preference Reliability
     const studentPref = studentHistory.filter((h) => h.hasPreference);
     const studentPrefReliability = studentPref.length > 0
       ? studentPref.filter((h) => h.attended).length / studentPref.length
       : 0.85;
 
-    // Corporate Preference Reliability
     const corpPref = corporateHistory.filter((h) => h.hasPreference);
     const corporatePrefReliability = corpPref.length > 0
       ? corpPref.filter((h) => h.attended).length / corpPref.length
@@ -359,63 +378,160 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
   }
 
   /**
-   * Prototype Waste Risk Classification based on planned vs predicted.
-   * Documented as prototype business rules.
+   * Waste Risk Classification incorporating historical MealOutcome evidence.
+   * 
+   * Prototype business rules:
+   * 1. If planned preparation is known:
+   *    - Planned excess > 20% OR (planned excess > 12% AND historical waste > 5%) -> HIGH
+   *    - Planned excess > 8% OR (planned excess > 5% AND excessive leftover freq > 25%) -> MEDIUM
+   *    - Otherwise -> LOW
+   * 2. If planned preparation is not yet entered (kitchen seeking prediction guidance):
+   *    - Evaluates historical outcome evidence for comparable meals:
+   *      - Historical waste > 8% OR excessive leftover freq >= 35% -> HIGH
+   *      - Historical waste > 4% OR historical leftover ratio > 10% -> MEDIUM
+   *      - Otherwise -> LOW
    */
-  public evaluateWasteRisk(expectedDiners: number, plannedServings: number): WasteRiskLevel {
-    if (expectedDiners <= 0) return "LOW";
-    const excessPercentage = (plannedServings - expectedDiners) / expectedDiners;
+  public evaluateWasteRisk(
+    expectedDiners: number,
+    plannedServings: number | undefined,
+    comparableHistoricalMeals: ComparableMealMetric[]
+  ): { wasteRisk: WasteRiskLevel; evidence: HistoricalWasteEvidence } {
+    // Collect historical outcome records
+    const outcomesWithData = comparableHistoricalMeals.filter(
+      (m) => m.preparedServings !== undefined && m.preparedServings > 0
+    );
 
-    if (excessPercentage > 0.20) {
-      return "HIGH"; // >20% over-preparation
+    let totalPrepared = 0;
+    let totalRemaining = 0;
+    let totalWasted = 0;
+    let excessiveLeftoverCount = 0;
+
+    for (const m of outcomesWithData) {
+      const prepared = m.preparedServings || 0;
+      const remaining = m.remainingServings ?? Math.max(0, prepared - m.totalActualDiners);
+      const wasted = m.wastedServings ?? Math.round(remaining * 0.45);
+
+      totalPrepared += prepared;
+      totalRemaining += remaining;
+      totalWasted += wasted;
+
+      if (prepared > 0 && remaining / prepared > 0.15) {
+        excessiveLeftoverCount++;
+      }
     }
-    if (excessPercentage > 0.08) {
-      return "MEDIUM"; // 8% to 20% over-preparation
+
+    const evaluatedCount = outcomesWithData.length;
+    const avgLeftoverPercent = totalPrepared > 0 ? (totalRemaining / totalPrepared) * 100 : 6.0;
+    const avgWastePercent = totalPrepared > 0 ? (totalWasted / totalPrepared) * 100 : 2.5;
+    const excessiveFreqPercent = evaluatedCount > 0 ? (excessiveLeftoverCount / evaluatedCount) * 100 : 0;
+
+    let wasteRisk: WasteRiskLevel = "LOW";
+    let riskReasoning = "";
+
+    if (plannedServings !== undefined && plannedServings > 0 && expectedDiners > 0) {
+      const plannedExcessPercent = ((plannedServings - expectedDiners) / expectedDiners) * 100;
+
+      if (plannedExcessPercent > 20 || (plannedExcessPercent > 12 && avgWastePercent > 5)) {
+        wasteRisk = "HIGH";
+        riskReasoning = `High waste risk — planned preparation (${plannedServings}) exceeds predicted demand (${expectedDiners}) by +${plannedExcessPercent.toFixed(1)}%, compounded by historical waste rate of ${avgWastePercent.toFixed(1)}%.`;
+      } else if (plannedExcessPercent > 8 || (plannedExcessPercent > 5 && excessiveFreqPercent > 25)) {
+        wasteRisk = "MEDIUM";
+        riskReasoning = `Medium waste risk — planned preparation (${plannedServings}) carries moderate excess (+${plannedExcessPercent.toFixed(1)}%) above predicted demand.`;
+      } else {
+        wasteRisk = "LOW";
+        riskReasoning = `Low waste risk — planned preparation (${plannedServings}) tightly aligns with predicted demand (+${plannedExcessPercent.toFixed(1)}% buffer).`;
+      }
+    } else {
+      // Planned prep not specified: evaluate risk based on historical outcome evidence
+      if (avgWastePercent > 8 || excessiveFreqPercent >= 35) {
+        wasteRisk = "HIGH";
+        riskReasoning = `High waste risk based on historical outcomes — comparable meals averaged ${avgWastePercent.toFixed(1)}% food waste with ${excessiveFreqPercent.toFixed(0)}% frequency of excessive leftovers.`;
+      } else if (avgWastePercent > 4 || avgLeftoverPercent > 10) {
+        wasteRisk = "MEDIUM";
+        riskReasoning = `Medium waste risk based on historical outcomes — comparable meals averaged ${avgLeftoverPercent.toFixed(1)}% unconsumed leftovers (${avgWastePercent.toFixed(1)}% wasted).`;
+      } else {
+        wasteRisk = "LOW";
+        riskReasoning = `Low waste risk based on historical outcomes — comparable meals maintained low leftovers (${avgLeftoverPercent.toFixed(1)}%) and minimal waste (${avgWastePercent.toFixed(1)}%).`;
+      }
     }
-    return "LOW"; // <=8% buffer
+
+    return {
+      wasteRisk,
+      evidence: {
+        evaluatedOutcomesCount: evaluatedCount,
+        averageLeftoverPercent: Math.round(avgLeftoverPercent * 10) / 10,
+        averageWastePercent: Math.round(avgWastePercent * 10) / 10,
+        excessiveLeftoverFrequencyPercent: Math.round(excessiveFreqPercent * 10) / 10,
+        riskReasoning,
+      },
+    };
   }
 
   /**
-   * Prediction Confidence classification based on historical volume & consistency.
+   * Prediction Confidence classification dynamically calculated from actual historical attendance observations.
    */
   public evaluateConfidence(
     comparableHistoricalMeals: ComparableMealMetric[],
     dayOfWeek: number,
     mealType: MealType
-  ): { confidenceLevel: ConfidenceLevel; confidenceReason: string } {
+  ): { confidenceLevel: ConfidenceLevel; confidenceReason: string; metrics: ConfidenceMetrics } {
     const count = comparableHistoricalMeals.length;
 
-    // In a 90-day historical window, a specific day-of-week meal (e.g. Saturday Dinner) occurs ~12 times.
-    if (count >= 10) {
-      // Check variation
-      const dinersList = comparableHistoricalMeals.map((m) => m.totalActualDiners);
-      const mean = dinersList.reduce((sum, val) => sum + val, 0) / count;
-      const variance = dinersList.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / count;
-      const stdDev = Math.sqrt(variance);
-      const cv = mean > 0 ? stdDev / mean : 0;
+    if (count === 0) {
+      return {
+        confidenceLevel: "LOW",
+        confidenceReason: "Low confidence — zero comparable historical meals found. Prediction relies entirely on cohort population defaults.",
+        metrics: {
+          comparableMealsCount: 0,
+          calculatedCoefficientOfVariation: 0,
+          attendanceMean: 0,
+          attendanceStdDev: 0,
+        },
+      };
+    }
 
+    // Dynamic statistical variance calculation across historical attendance
+    const dinersList = comparableHistoricalMeals.map((m) => m.totalActualDiners);
+    const mean = dinersList.reduce((sum, val) => sum + val, 0) / count;
+    const variance = dinersList.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / count;
+    const stdDev = Math.sqrt(variance);
+    const cv = mean > 0 ? stdDev / mean : 0;
+
+    const metrics: ConfidenceMetrics = {
+      comparableMealsCount: count,
+      calculatedCoefficientOfVariation: Math.round(cv * 1000) / 1000,
+      attendanceMean: Math.round(mean * 10) / 10,
+      attendanceStdDev: Math.round(stdDev * 10) / 10,
+    };
+
+    // In a 90-day dataset, weekly meals (e.g. Saturday Dinner) occur ~12-13 times
+    if (count >= 10) {
       if (cv < 0.20) {
         return {
           confidenceLevel: "HIGH",
           confidenceReason: `High confidence — based on ${count} comparable historical meals with consistent attendance (CV: ${(cv * 100).toFixed(1)}%).`,
+          metrics,
         };
       }
       return {
         confidenceLevel: "MEDIUM",
-        confidenceReason: `Medium confidence — based on ${count} comparable meals with moderate attendance variation.`,
+        confidenceReason: `Medium confidence — based on ${count} comparable meals with moderate attendance variation (CV: ${(cv * 100).toFixed(1)}%).`,
+        metrics,
       };
     }
 
     if (count >= 5) {
       return {
         confidenceLevel: "MEDIUM",
-        confidenceReason: `Medium confidence — based on ${count} comparable historical meals.`,
+        confidenceReason: `Medium confidence — based on ${count} comparable historical meals (CV: ${(cv * 100).toFixed(1)}%).`,
+        metrics,
       };
     }
 
     return {
       confidenceLevel: "LOW",
-      confidenceReason: `Low confidence — limited historical data (${count} comparable meals). Model relies on general cohort baselines.`,
+      confidenceReason: `Low confidence — limited historical sample (${count} comparable meals). Model relies on broader cohort baselines.`,
+      metrics,
     };
   }
 
@@ -489,7 +605,7 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
       currentPrefMap.set(p.residentId, { selectedOption: p.selectedOption });
     }
 
-    // Comparable meals (same day-of-week + meal-type)
+    // Comparable meals (same day-of-week + meal-type) with full MealOutcome evidence
     const targetDayOfWeek = targetDate.getDay();
     const comparableHistoricalMeals: ComparableMealMetric[] = pastMeals
       .filter((pm) => new Date(pm.mealDate).getDay() === targetDayOfWeek && pm.mealType === targetMeal.mealType)
@@ -499,6 +615,9 @@ export class DeterministicPredictionEngine implements IPredictionEngine {
         mealType: pm.mealType,
         menuId: pm.menuId,
         totalActualDiners: pm.outcome?.actualDiners ?? pm.scans.length,
+        preparedServings: pm.outcome?.preparedServings,
+        remainingServings: pm.outcome?.remainingServings,
+        wastedServings: pm.outcome?.wastedServings,
       }));
 
     const result = this.calculateDemand(
