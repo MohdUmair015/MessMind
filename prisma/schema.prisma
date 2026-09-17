@@ -1,0 +1,164 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum ResidentType {
+  STUDENT
+  CORPORATE
+}
+
+enum ResidentStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+}
+
+enum WasteRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ConfidenceLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum UserRole {
+  MESS_MANAGER
+  HOSTEL_ADMIN
+}
+
+model Resident {
+  id           String         @id @default(uuid())
+  residentCode String         @unique @map("resident_code")
+  residentType ResidentType   @map("resident_type")
+  status       ResidentStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  preferences  MealPreference[]
+  scans        MealScan[]
+
+  @@map("residents")
+}
+
+model Menu {
+  id        String   @id @default(uuid())
+  name      String
+  category  String
+  items     Json     // Array of food items/dishes in the menu
+  createdAt DateTime @default(now()) @map("created_at")
+
+  meals     Meal[]
+
+  @@map("menus")
+}
+
+model Meal {
+  id                 String          @id @default(uuid())
+  mealDate           DateTime        @map("meal_date") @db.Date
+  mealType           MealType        @map("meal_type")
+  menuId             String          @map("menu_id")
+  isServed           Boolean         @default(false) @map("is_served")
+  preferenceDeadline DateTime        @map("preference_deadline")
+  createdAt          DateTime        @default(now()) @map("created_at")
+
+  menu               Menu            @relation(fields: [menuId], references: [id])
+  preferences        MealPreference[]
+  scans              MealScan[]
+  outcome            MealOutcome?
+  prediction         Prediction?
+
+  @@unique([mealDate, mealType])
+  @@map("meals")
+}
+
+model MealPreference {
+  id             String   @id @default(uuid())
+  mealId         String   @map("meal_id")
+  residentId     String   @map("resident_id")
+  // Flexible string identifier representing the chosen meal option (e.g. "REGULAR", "JAIN", "VEGAN", "OPT_OUT", etc.)
+  selectedOption String   @map("selected_option")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  meal           Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  resident       Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@unique([mealId, residentId])
+  @@map("meal_preferences")
+}
+
+model MealScan {
+  id         String   @id @default(uuid())
+  mealId     String   @map("meal_id")
+  residentId String   @map("resident_id")
+  scannedAt  DateTime @default(now()) @map("scanned_at")
+
+  meal       Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  resident   Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@unique([mealId, residentId])
+  @@map("meal_scans")
+}
+
+model MealOutcome {
+  id                String   @id @default(uuid())
+  mealId            String   @unique @map("meal_id")
+  preparedServings  Int      @map("prepared_servings")
+  actualDiners      Int      @map("actual_diners")
+  remainingServings Int      @map("remaining_servings")
+  wastedServings    Int      @map("wasted_servings")
+  recordedAt        DateTime @default(now()) @map("recorded_at")
+
+  meal              Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
+
+  @@map("meal_outcomes")
+}
+
+model Prediction {
+  id                  String          @id @default(uuid())
+  mealId              String          @unique @map("meal_id")
+  predictedDiners     Int             @map("predicted_diners")
+  recommendedServings Int             @map("recommended_servings")
+  wasteRisk           WasteRiskLevel  @map("waste_risk")
+  confidenceLevel     ConfidenceLevel @map("confidence_level")
+  predictionFactors   Json            @map("prediction_factors")
+  algorithmVersion    String          @default("v1.0-deterministic") @map("algorithm_version")
+  explanation         String?         // Natural language summary generated via Gemini
+  createdAt           DateTime        @default(now()) @map("created_at")
+
+  meal                Meal            @relation(fields: [mealId], references: [id], onDelete: Cascade)
+
+  @@map("predictions")
+}
+
+model PredictionSetting {
+  id                            String   @id @default("default")
+  bufferPercentage              Float    @default(5.0) @map("buffer_percentage")
+  highWasteRiskThresholdPercent Float    @default(20.0) @map("high_waste_risk_threshold_percent")
+  updatedAt                     DateTime @updatedAt @map("updated_at")
+
+  @@map("prediction_settings")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  userRole  UserRole @map("user_role")
+  details   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
