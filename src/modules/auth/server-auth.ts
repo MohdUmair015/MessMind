@@ -22,12 +22,23 @@ export class AuthorizationError extends Error {
   }
 }
 
-export async function getServerUser(): Promise<AuthUser> {
-  const reqHeaders = await headers();
-  
-  // In demo mode, inspect development header; in production, verify signed session/token
-  const demoRoleHeader = reqHeaders.get("x-messmind-demo-role") as UserRole | null;
-  const activeRole: UserRole = demoRoleHeader === "HOSTEL_ADMIN" ? "HOSTEL_ADMIN" : "MESS_MANAGER";
+export async function getServerUser(mockRole?: UserRole): Promise<AuthUser> {
+  let activeRole: UserRole = "MESS_MANAGER";
+
+  if (mockRole) {
+    activeRole = mockRole;
+  } else {
+    try {
+      const reqHeaders = await headers();
+      const demoRoleHeader = reqHeaders.get("x-messmind-demo-role") as UserRole | null;
+      if (demoRoleHeader === "HOSTEL_ADMIN" || demoRoleHeader === "MESS_MANAGER") {
+        activeRole = demoRoleHeader;
+      }
+    } catch {
+      // Running outside Next.js request context (e.g. in test suite or background worker)
+      activeRole = "MESS_MANAGER";
+    }
+  }
 
   return {
     id: activeRole === "HOSTEL_ADMIN" ? "admin-synthetic-01" : "manager-synthetic-01",
@@ -38,8 +49,11 @@ export async function getServerUser(): Promise<AuthUser> {
   };
 }
 
-export async function requireServerRole(allowedRoles: UserRole[]): Promise<AuthUser> {
-  const user = await getServerUser();
+export async function requireServerRole(
+  allowedRoles: UserRole[],
+  mockRole?: UserRole
+): Promise<AuthUser> {
+  const user = await getServerUser(mockRole);
 
   if (!allowedRoles.includes(user.role)) {
     throw new AuthorizationError(
@@ -50,8 +64,11 @@ export async function requireServerRole(allowedRoles: UserRole[]): Promise<AuthU
   return user;
 }
 
-export async function requirePermission(permission: Permission): Promise<AuthUser> {
-  const user = await getServerUser();
+export async function requirePermission(
+  permission: Permission,
+  mockRole?: UserRole
+): Promise<AuthUser> {
+  const user = await getServerUser(mockRole);
 
   if (!user.permissions.includes(permission)) {
     throw new AuthorizationError(`Access denied: Missing required permission '${permission}'`);

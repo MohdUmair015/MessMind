@@ -228,7 +228,9 @@ async function main() {
     )
   );
 
-  const residentIdMap = new Map(createdResidents.map((r) => [r.residentCode, r]));
+  const residentIdMap = new Map<string, (typeof createdResidents)[number]>(
+    createdResidents.map((r) => [r.residentCode, r])
+  );
 
   // 4. Generate 90-day Meal History
   console.log("Generating 90-day historical meal timeline...");
