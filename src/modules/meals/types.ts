@@ -18,9 +18,10 @@ export interface MealListItem {
 export interface RecordMealOutcomeInput {
   mealId: string;
   preparedServings: number;
-  actualDiners: number;
+  actualDiners?: number;
   remainingServings: number;
   wastedServings: number;
+  isDemoOverride?: boolean;
 }
 
 export interface MealDetailDTO {
@@ -51,7 +52,11 @@ export interface MealDetailDTO {
     actualDiners: number;
     remainingServings: number;
     wastedServings: number;
+    estimatedSurplus?: number | null;
+    attendanceSource?: string;
+    uniqueScansCount?: number;
     recordedAt: string;
-    predictionError: number;
+    predictionError: number | null;
   };
 }
+

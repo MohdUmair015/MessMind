@@ -47,6 +47,7 @@ export interface MealScan {
   id: string;
   mealId: string;
   residentId: string;
+  sourceSystem?: string;
   scannedAt: Date;
 }
 
@@ -55,8 +56,10 @@ export interface MealOutcome {
   mealId: string;
   preparedServings: number;
   actualDiners: number;
+  attendanceSource?: string;
   remainingServings: number;
   wastedServings: number;
+  estimatedSurplus?: number | null;
   recordedAt: Date;
 }
 
@@ -81,6 +84,7 @@ export interface Prediction {
   predictionFactors: PredictionFactors;
   algorithmVersion: string;
   explanation?: string | null;
+  explanationSource?: string | null;
   createdAt: Date;
 }
 

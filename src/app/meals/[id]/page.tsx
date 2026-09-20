@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { mealService } from "@/modules/meals/meal-service";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { formatDate } from "@/lib/utils";
+import { formatDate, cn } from "@/lib/utils";
 import { OutcomeRecordingForm } from "@/components/meals/OutcomeRecordingForm";
 import { RegeneratePredictionButton } from "@/components/predictions/RegeneratePredictionButton";
+import { SyncScannerButton } from "@/components/meals/SyncScannerButton";
+import { LifecycleStepper, LifecycleStage } from "@/components/ui/LifecycleStepper";
 import {
   ArrowLeft,
   Clock,
@@ -15,6 +16,10 @@ import {
   Utensils,
   ShieldCheck,
   Sparkles,
+  QrCode,
+  Info,
+  Scale,
+  ChefHat,
 } from "lucide-react";
 
 export default async function MealDetailPage({
@@ -29,246 +34,352 @@ export default async function MealDetailPage({
     notFound();
   }
 
-  const { meal, eligibleCount, prediction, predictionError } = data;
+  const {
+    meal,
+    eligibleCount,
+    prediction,
+    predictionError,
+    uniqueScansCount,
+    duplicateScansSuppressedCount,
+    authoritativeActualDiners,
+    actualPreparedServings,
+    estimatedSurplus,
+    attendanceStatus,
+  } = data;
+
   const rawFactors = prediction?.predictionFactors as any;
   const menuItems = Array.isArray(meal.menu.items)
     ? (meal.menu.items as string[])
     : [];
 
+  const hasAuthoritativeScans = authoritativeActualDiners !== null && authoritativeActualDiners > 0;
+
+  // Determine current lifecycle stage
+  let currentStage: LifecycleStage = "PREDICT";
+  if (meal.outcome?.wastedServings !== undefined) {
+    currentStage = "LEARN";
+  } else if (hasAuthoritativeScans) {
+    currentStage = "OBSERVE";
+  } else {
+    currentStage = "PREPARE";
+  }
+
+  const expectedDiners = prediction?.predictedDiners ?? 90;
+  const recommendedServings = prediction?.recommendedServings ?? 95;
+
   return (
-    <div className="space-y-6">
-      {/* Navigation & Header */}
+    <div className="space-y-8 md:space-y-12">
+      {/* Top Header & Breadcrumb */}
       <div>
         <Link
           href="/meals"
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors mb-3"
+          className="inline-flex items-center gap-2 text-xs font-bold text-coral-600 hover:text-coral-700 transition-colors mb-4 group"
         >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Back to Meals List</span>
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+          <span>Back to Operations Timeline</span>
         </Link>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 min-w-0">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-3xl md:text-5xl font-black text-charcoal-950 tracking-tight break-words">
                 {meal.menu.name}
               </h1>
-              <Badge variant={meal.isServed ? "default" : "teal"}>
-                {meal.isServed ? "Outcome Recorded" : "Upcoming Guidance"}
+              <Badge variant={meal.isServed ? "charcoal" : "coral"} size="sm" dot className="shrink-0">
+                {meal.isServed ? "Service Completed" : "Upcoming Service"}
               </Badge>
             </div>
-            <p className="text-sm text-slate-500 mt-1">
-              {formatDate(meal.mealDate)} · {meal.mealType} Service · Category: {meal.menu.category}
+            <p className="text-sm md:text-base text-charcoal-600 mt-1 break-words">
+              {formatDate(meal.mealDate)} · {meal.mealType} Service · Category: {meal.menu.category} · {eligibleCount} Active Residents
             </p>
           </div>
 
-          <RegeneratePredictionButton mealId={meal.id} />
+          <div className="flex flex-wrap items-center gap-3">
+            <SyncScannerButton
+              mealId={meal.id}
+              hasScans={uniqueScansCount > 0}
+              uniqueScansCount={uniqueScansCount}
+            />
+            <RegeneratePredictionButton mealId={meal.id} />
+          </div>
         </div>
       </div>
 
-      {/* Two Columns: Before Meal Guidance vs After Meal Outcome Recording */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Stage 1: Before Meal Prediction Guidance */}
-        <div className="space-y-6">
-          <Card className="border-teal-100/80">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-teal-600" />
-                  <span>Pre-Meal Preparation Guidance</span>
-                </CardTitle>
-                <Badge variant="teal">Deterministic Engine</Badge>
+      {/* 5-STAGE LIFECYCLE PROGRESSION */}
+      <LifecycleStepper
+        currentStage={currentStage}
+        predictedDiners={expectedDiners}
+        recommendedServings={recommendedServings}
+        actualScans={authoritativeActualDiners}
+        predictionError={predictionError}
+      />
+
+      {/* TWO MAIN JOURNEY COLUMNS: Pre-Meal Guidance vs Dining Scanner & Audit */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* Left Column (6 cols): Stage 1 & 2 Pre-Meal Preparation Guidance */}
+        <div className="lg:col-span-6 space-y-8">
+          <section className="p-8 rounded-3xl bg-white border border-surface-border shadow-warm-card space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-surface-border/70">
+              <div className="flex items-center gap-2.5">
+                <ChefHat className="w-5 h-5 text-coral-500" />
+                <h3 className="text-base font-black text-charcoal-900">
+                  Pre-Meal Preparation Guidance
+                </h3>
               </div>
-              <CardDescription>
-                Food-demand forecast calculated before meal preparation starts
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {prediction ? (
-                <div className="space-y-4">
-                  {/* Metric highlights */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <div className="text-xs text-slate-500 font-medium">Expected Diners</div>
-                      <div className="text-2xl font-bold text-teal-700 mt-0.5">
-                        {prediction.predictedDiners}
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        Baseline: {rawFactors?.historicalBaselineDiners ?? 86} diners
-                      </div>
-                    </div>
+              <Badge variant="coral" size="xs">
+                Deterministic Guidance
+              </Badge>
+            </div>
 
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <div className="text-xs text-slate-500 font-medium">Recommended Prep</div>
-                      <div className="text-2xl font-bold text-slate-900 mt-0.5">
-                        {prediction.recommendedServings}
-                      </div>
-                      <div className="text-[11px] text-slate-400">+5% safety buffer</div>
-                    </div>
-                  </div>
-
-                  {/* Confidence & Waste Risk Row */}
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-2 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-500">Prediction Confidence:</span>
-                      <Badge variant="teal" size="sm">
-                        {prediction.confidenceLevel}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-500">Food Waste Risk:</span>
-                      <Badge
-                        variant={
-                          prediction.wasteRisk === "HIGH"
-                            ? "rose"
-                            : prediction.wasteRisk === "MEDIUM"
-                            ? "amber"
-                            : "emerald"
-                        }
-                        size="sm"
-                      >
-                        {prediction.wasteRisk}
-                      </Badge>
-                    </div>
-                    <div className="text-[11px] text-slate-500 pt-1.5 border-t border-slate-200/80">
-                      {rawFactors?.wasteEvidence?.riskReasoning ??
-                        "Comparable meals maintained low leftover and waste ratios."}
-                    </div>
-                  </div>
-
-                  {/* Five Weighted Factors Summary */}
-                  {rawFactors?.weightedFactors && (
-                    <div className="p-3.5 bg-teal-50/50 rounded-xl border border-teal-100 text-xs text-teal-950 space-y-2">
-                      <div className="font-semibold text-teal-900 flex items-center justify-between">
-                        <span>Weighted Behavioral Factors</span>
-                        <span className="text-[10px] bg-teal-200/60 px-1.5 py-0.5 rounded font-bold">
-                          40/20/15/15/10
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-[11px] text-teal-800">
-                        <div>• Personal History: {(rawFactors.weightedFactors.personalHistoricalRate * 100).toFixed(0)}%</div>
-                        <div>• Day-of-Week: {(rawFactors.weightedFactors.dayOfWeekPatternRate * 100).toFixed(0)}%</div>
-                        <div>• Meal-Type: {(rawFactors.weightedFactors.mealTypePatternRate * 100).toFixed(0)}%</div>
-                        <div>• Recent Trend: {(rawFactors.weightedFactors.recentAttendanceTrendRate * 100).toFixed(0)}%</div>
-                        <div className="col-span-2">• Preference Intention: {(rawFactors.weightedFactors.preferenceIntentionRate * 100).toFixed(0)}%</div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Natural Language Explanation Placeholder (Phase 3BSeam) */}
-                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 text-xs text-slate-600 flex items-start gap-2">
-                    <Sparkles className="w-3.5 h-3.5 text-teal-600 flex-shrink-0 mt-0.5" />
-                    <div className="text-[11px]">
-                      <span className="font-semibold text-slate-800">Manager Insight: </span>
-                      {prediction.explanation ??
-                        `Expected demand for ${formatDate(meal.mealDate)} ${meal.mealType} is ${prediction.predictedDiners} diners. Recommended kitchen preparation is ${prediction.recommendedServings} servings with ${prediction.wasteRisk} waste risk.`}
-                    </div>
-                  </div>
+            {/* Metric Highlights Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
+              <div className="p-5 bg-cream-50 rounded-2xl border border-surface-border min-w-0">
+                <span className="text-xs font-black uppercase tracking-wider text-charcoal-500 block">
+                  Expected Diners
+                </span>
+                <div className="text-4xl font-black text-charcoal-950 mt-1 tabular-nums">
+                  {expectedDiners}
                 </div>
-              ) : (
-                <div className="p-6 text-center text-slate-500 text-xs">
-                  No prediction calculated for this meal yet. Click Recalculate above.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                <span className="text-xs text-charcoal-600 mt-1 block">
+                  Baseline: {rawFactors?.historicalBaselineDiners ?? 86} diners
+                </span>
+              </div>
 
-          {/* Menu Items Preview */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Utensils className="w-4 h-4 text-teal-600" />
-                <span>Menu Dish Breakdown</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+              <div className="p-5 bg-coral-50/60 rounded-2xl border border-coral-200 min-w-0">
+                <span className="text-xs font-black uppercase tracking-wider text-coral-600 block">
+                  Recommended Prep
+                </span>
+                <div className="text-4xl font-black text-coral-600 mt-1 tabular-nums">
+                  {recommendedServings}
+                </div>
+                <span className="text-xs text-coral-700 mt-1 block font-semibold">
+                  Includes +5% safety buffer
+                </span>
+              </div>
+            </div>
+
+            {/* Confidence & Waste Risk Row */}
+            <div className="p-5 bg-cream-50 rounded-2xl border border-surface-border space-y-3 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-charcoal-600 font-medium">Prediction Confidence:</span>
+                <Badge variant="mint" size="sm">
+                  {prediction?.confidenceLevel ?? "HIGH"}
+                </Badge>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-charcoal-600 font-medium">Food Waste Risk:</span>
+                <Badge
+                  variant={
+                    prediction?.wasteRisk === "HIGH"
+                      ? "coral"
+                      : prediction?.wasteRisk === "MEDIUM"
+                      ? "mango"
+                      : "mint"
+                  }
+                  size="sm"
+                >
+                  {prediction?.wasteRisk ?? "LOW"}
+                </Badge>
+              </div>
+              <p className="text-xs text-charcoal-600 pt-3 border-t border-surface-border/70 leading-relaxed">
+                {rawFactors?.wasteEvidence?.riskReasoning ??
+                  "Comparable services maintained low leftover and waste ratios without shortages."}
+              </p>
+            </div>
+
+            {/* Planned Menu Dishes */}
+            <div>
+              <span className="text-xs font-black uppercase tracking-wider text-charcoal-500 block mb-3">
+                Planned Menu Dishes
+              </span>
               <div className="flex flex-wrap gap-2">
                 {menuItems.map((dish, i) => (
                   <span
                     key={i}
-                    className="px-3 py-1 bg-slate-100 text-slate-800 text-xs font-medium rounded-full border border-slate-200"
+                    className="px-3.5 py-1.5 bg-cream-100 text-charcoal-800 text-xs font-bold rounded-xl border border-surface-border"
                   >
                     {dish}
                   </span>
                 ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         </div>
 
-        {/* Stage 2: After Meal Outcome Recording Form & Feedback Loop */}
-        <div className="space-y-6">
-          <Card className="border-slate-200">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-slate-900" />
-                  <span>Post-Meal Outcome Recording</span>
-                </CardTitle>
-                <Badge variant={meal.outcome ? "default" : "outline"}>
-                  {meal.outcome ? "Saved to PostgreSQL" : "Awaiting Manager Log"}
-                </Badge>
+        {/* Right Column (6 cols): Stage 3, 4 & 5 Dining Scanner & Waste Audit */}
+        <div className="lg:col-span-6 space-y-8">
+          {/* Post-Meal Dining Scanner Synchronization Card */}
+          <section className="p-8 rounded-3xl bg-white border border-surface-border shadow-warm-card space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-surface-border/70">
+              <div className="flex items-center gap-2.5">
+                <QrCode className="w-5 h-5 text-coral-500" />
+                <h3 className="text-base font-black text-charcoal-900">
+                  Hostel Dining Scanner Integration
+                </h3>
               </div>
-              <CardDescription>
-                Record kitchen preparation and observed consumption to complete the learning feedback loop
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <OutcomeRecordingForm
-                mealId={meal.id}
-                predictedDiners={prediction?.predictedDiners}
-                initialOutcome={
-                  meal.outcome
-                    ? {
-                        preparedServings: meal.outcome.preparedServings,
-                        actualDiners: meal.outcome.actualDiners,
-                        remainingServings: meal.outcome.remainingServings,
-                        wastedServings: meal.outcome.wastedServings,
-                        recordedAt: meal.outcome.recordedAt.toISOString(),
-                      }
-                    : null
-                }
-              />
-            </CardContent>
-          </Card>
+              <Badge variant={hasAuthoritativeScans ? "mint" : "outline"} size="xs">
+                {hasAuthoritativeScans ? "Scanner Synchronized" : "Awaiting Scanner Feed"}
+              </Badge>
+            </div>
 
-          {/* Outcome Comparison Summary if Already Recorded */}
-          {meal.outcome && (
-            <Card className="bg-slate-50 border-slate-200">
-              <CardHeader>
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-teal-600" />
-                  <span>Observed Prediction vs Actual Performance</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 text-xs text-slate-600">
-                  <div className="flex justify-between p-2 bg-white rounded border border-slate-200">
-                    <span>Predicted vs Actual Diners:</span>
-                    <span className="font-bold text-slate-900">
-                      {prediction?.predictedDiners ?? "—"} predicted vs {meal.outcome.actualDiners} actual
+            {hasAuthoritativeScans ? (
+              <div className="space-y-5">
+                {/* 3-Column Comparison Box */}
+                <div className="p-5 bg-cream-50 rounded-2xl border border-surface-border min-w-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center min-w-0">
+                    <div className="p-3.5 bg-white rounded-2xl border border-surface-border shadow-2xs">
+                      <span className="text-xs font-bold uppercase tracking-wider text-charcoal-500 block">
+                        Predicted
+                      </span>
+                      <div className="text-3xl font-black text-charcoal-900 mt-1 tabular-nums">
+                        {expectedDiners}
+                      </div>
+                      <span className="text-[11px] text-charcoal-500">expected</span>
+                    </div>
+
+                    <div className="p-3.5 bg-white rounded-2xl border border-coral-200 shadow-2xs">
+                      <span className="text-xs font-bold uppercase tracking-wider text-coral-600 block">
+                        Actual Scans
+                      </span>
+                      <div className="text-3xl font-black text-coral-600 mt-1 tabular-nums">
+                        {authoritativeActualDiners}
+                      </div>
+                      <span className="text-[11px] text-charcoal-500">unique residents</span>
+                    </div>
+
+                    <div className="p-3.5 bg-white rounded-2xl border border-mint-200 shadow-2xs">
+                      <span className="text-xs font-bold uppercase tracking-wider text-charcoal-500 block">
+                        Model Error
+                      </span>
+                      <div className="text-3xl font-black text-mint-700 mt-1 tabular-nums">
+                        {predictionError !== null ? `${predictionError}%` : "—"}
+                      </div>
+                      <span className="text-[11px] text-charcoal-500">absolute error</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-surface-border flex items-center justify-between text-xs text-charcoal-600">
+                    <span className="flex items-center gap-1.5 text-charcoal-900 font-bold text-xs">
+                      <CheckCircle2 className="w-4 h-4 text-mint-600" />
+                      <span>Authoritative source: Hostel App Dining Scanner</span>
                     </span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-white rounded border border-slate-200">
-                    <span>Prediction Error:</span>
-                    <span className="font-bold text-emerald-700">
-                      {predictionError !== null ? `${predictionError}%` : "—"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-white rounded border border-slate-200">
-                    <span>Unconsumed Remaining Portions:</span>
-                    <span className="font-semibold text-slate-800">{meal.outcome.remainingServings} servings</span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-white rounded border border-slate-200">
-                    <span>Food Waste Discarded:</span>
-                    <span className="font-semibold text-rose-700">{meal.outcome.wastedServings} servings</span>
+                    {duplicateScansSuppressedCount > 0 && (
+                      <span className="text-xs text-charcoal-500">
+                        ({duplicateScansSuppressedCount} duplicate suppressed)
+                      </span>
+                    )}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+
+                {/* Clear Semantics Breakdown Card */}
+                <div className="p-5 bg-cream-50 rounded-2xl border border-surface-border space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-charcoal-900 text-sm">
+                      <Scale className="w-4 h-4 text-coral-500" />
+                      <span>Food Intelligence Outcome Semantics</span>
+                    </div>
+                    <Badge variant={actualPreparedServings !== null ? "mint" : "outline"} size="xs">
+                      {actualPreparedServings !== null ? "Preparation Audited" : "Actual Prep Not Recorded"}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-3 text-xs pt-1 min-w-0">
+                    <div className="p-3.5 bg-white rounded-xl border border-surface-border min-w-0">
+                      <span className="text-charcoal-500 text-xs uppercase font-bold tracking-wider block">
+                        Actual Preparation
+                      </span>
+                      <span className="font-black text-charcoal-900 text-base mt-1 block break-words">
+                        {actualPreparedServings !== null ? `${actualPreparedServings} servings` : "Actual preparation: Not recorded"}
+                      </span>
+                      <span className="text-[11px] text-charcoal-500 block mt-1 break-words">
+                        {actualPreparedServings !== null ? "Verified kitchen audit" : "Recommended prep ≠ actual prep"}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 bg-white rounded-xl border border-surface-border min-w-0">
+                      <span className="text-charcoal-500 text-xs uppercase font-bold tracking-wider block">
+                        Scanner Attendance
+                      </span>
+                      <span className="font-black text-charcoal-900 text-base mt-1 block break-words">
+                        {authoritativeActualDiners !== null ? `${authoritativeActualDiners} unique scans` : "Pending scans"}
+                      </span>
+                      <span className="text-[11px] text-charcoal-500 block mt-1 break-words">
+                        Synced from Hostel App
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 bg-white rounded-xl border border-surface-border min-w-0">
+                      <span className="text-charcoal-500 text-xs uppercase font-bold tracking-wider block">
+                        Estimated Surplus
+                      </span>
+                      <span className={cn("text-base font-black mt-1 block break-words", estimatedSurplus !== null ? "text-coral-600" : "text-charcoal-400")}>
+                        {estimatedSurplus !== null ? `${estimatedSurplus} servings` : "—"}
+                      </span>
+                      <span className="text-[11px] text-charcoal-500 block mt-1 break-words">
+                        {actualPreparedServings !== null ? "max(0, Actual Prep - Attendance)" : "Requires actual prep record"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-charcoal-600 pt-2 leading-relaxed border-t border-surface-border/70 break-words">
+                    Recommended preparation ({recommendedServings} servings) is purely a planning forecast. Surplus is calculated strictly from verified kitchen preparation minus scanner attendance. Discarded food waste requires an explicit kitchen scale audit.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="p-10 text-center bg-cream-50 rounded-2xl border border-surface-border space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-white border border-surface-border text-coral-500 flex items-center justify-center mx-auto shadow-2xs">
+                  <QrCode className="w-6 h-6" />
+                </div>
+                <h4 className="text-sm font-bold text-charcoal-900">
+                  Attendance data is still being collected by hostel app scanner.
+                </h4>
+                <p className="text-xs text-charcoal-600 max-w-sm mx-auto leading-relaxed">
+                  Residents scan via the hostel dining app upon entering. Actual diner count will automatically populate when sync occurs.
+                </p>
+              </div>
+            )}
+          </section>
+
+          {/* Kitchen Waste & Surplus Audit */}
+          <section className="p-8 rounded-3xl bg-white border border-surface-border shadow-warm-card">
+            <div className="flex items-center justify-between pb-4 border-b border-surface-border/70 mb-5">
+              <div>
+                <h4 className="text-base font-black text-charcoal-900">
+                  Kitchen Waste & Surplus Audit
+                </h4>
+                <p className="text-xs text-charcoal-600 mt-0.5">
+                  Physical leftovers and discarded food audit (Attendance locked to scans)
+                </p>
+              </div>
+              <Badge variant="outline" size="xs">
+                Physical Audit Log
+              </Badge>
+            </div>
+
+            <OutcomeRecordingForm
+              mealId={meal.id}
+              predictedDiners={prediction?.predictedDiners}
+              recommendedServings={prediction?.recommendedServings}
+              authoritativeScansCount={uniqueScansCount}
+              initialOutcome={
+                meal.outcome
+                  ? {
+                      preparedServings: meal.outcome.preparedServings,
+                      actualDiners: meal.outcome.actualDiners,
+                      remainingServings: meal.outcome.remainingServings,
+                      wastedServings: meal.outcome.wastedServings,
+                      attendanceSource: meal.outcome.attendanceSource,
+                      estimatedSurplus: meal.outcome.estimatedSurplus,
+                      recordedAt: meal.outcome.recordedAt.toISOString(),
+                    }
+                  : null
+              }
+            />
+          </section>
         </div>
       </div>
     </div>
   );
 }
+

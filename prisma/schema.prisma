@@ -101,13 +101,14 @@ model MealPreference {
 }
 
 model MealScan {
-  id         String   @id @default(uuid())
-  mealId     String   @map("meal_id")
-  residentId String   @map("resident_id")
-  scannedAt  DateTime @default(now()) @map("scanned_at")
+  id           String   @id @default(uuid())
+  mealId       String   @map("meal_id")
+  residentId   String   @map("resident_id")
+  sourceSystem String   @default("HOSTEL_APP_SCANNER") @map("source_system")
+  scannedAt    DateTime @default(now()) @map("scanned_at")
 
-  meal       Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
-  resident   Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  meal         Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  resident     Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
 
   @@unique([mealId, residentId])
   @@map("meal_scans")
@@ -118,8 +119,10 @@ model MealOutcome {
   mealId            String   @unique @map("meal_id")
   preparedServings  Int      @map("prepared_servings")
   actualDiners      Int      @map("actual_diners")
+  attendanceSource  String   @default("SCANNER_SYNC") @map("attendance_source") // "SCANNER_SYNC" | "MANUAL_DEMO_OVERRIDE"
   remainingServings Int      @map("remaining_servings")
   wastedServings    Int      @map("wasted_servings")
+  estimatedSurplus  Int?     @map("estimated_surplus")
   recordedAt        DateTime @default(now()) @map("recorded_at")
 
   meal              Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
@@ -136,7 +139,8 @@ model Prediction {
   confidenceLevel     ConfidenceLevel @map("confidence_level")
   predictionFactors   Json            @map("prediction_factors")
   algorithmVersion    String          @default("v1.0-deterministic") @map("algorithm_version")
-  explanation         String?         // Natural language summary generated via Gemini
+  explanation         String?         // Natural language summary generated via Bedrock
+  explanationSource   String?         @map("explanation_source") // "bedrock" | "fallback"
   createdAt           DateTime        @default(now()) @map("created_at")
 
   meal                Meal            @relation(fields: [mealId], references: [id], onDelete: Cascade)

@@ -4,6 +4,7 @@ import { validateMealOutcomeInput } from "../meal-service";
 import { requireServerRole, AuthorizationError } from "@/modules/auth/server-auth";
 import { UserRole } from "@/types";
 
+// Meal Service outcome recording and validation test suite
 test("Meal Service & Outcome Validation Test Suite", async (t) => {
   // 1. Valid Outcome Inputs Pass
   await t.test("1. Valid outcome inputs pass with zero errors", () => {
@@ -129,7 +130,7 @@ test("Meal Service & Outcome Validation Test Suite", async (t) => {
 
     const mealId = upcoming.meal.id;
 
-    // Record demo benchmark outcome (108 prepared, 99 actual, 9 remaining, 4 wasted)
+    // Record demo benchmark outcome (108 prepared, 99 actual, 9 remaining, 4 wasted) with demo override
     const outcome = await mealService.recordMealOutcome(
       {
         mealId,
@@ -137,6 +138,7 @@ test("Meal Service & Outcome Validation Test Suite", async (t) => {
         actualDiners: 99,
         remainingServings: 9,
         wastedServings: 4,
+        isDemoOverride: true,
       },
       "MESS_MANAGER"
     );
@@ -146,6 +148,7 @@ test("Meal Service & Outcome Validation Test Suite", async (t) => {
     assert.strictEqual(outcome.actualDiners, 99);
     assert.strictEqual(outcome.remainingServings, 9);
     assert.strictEqual(outcome.wastedServings, 4);
+    assert.strictEqual(outcome.attendanceSource, "MANUAL_DEMO_OVERRIDE");
 
     // Verify detail retrieval shows updated outcome and error percentage
     const detail = await mealService.getMealDetailById(mealId);

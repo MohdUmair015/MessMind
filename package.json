@@ -10,12 +10,13 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
-    "test": "tsx --test src/modules/**/__tests__/*.test.ts"
+    "test": "tsx --test --test-concurrency=1 src/modules/**/__tests__/*.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1136.0",
     "@prisma/client": "^6.3.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.475.0",

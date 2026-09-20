@@ -2,8 +2,10 @@ import { prisma } from "@/lib/db";
 import { MealType, UserRole } from "@/types";
 import { getServerUser, requireServerRole } from "@/modules/auth/server-auth";
 import { predictionEngine } from "@/modules/prediction";
+import { hostelDataProvider } from "@/modules/integration";
 import { RecordMealOutcomeInput } from "./types";
 
+// Meal service business logic and PostgreSQL outcome persistence
 export interface OutcomeValidationResult {
   valid: boolean;
   errors: string[];
@@ -20,7 +22,7 @@ export function validateMealOutcomeInput(input: RecordMealOutcomeInput): Outcome
     errors.push("Prepared servings must be a non-negative integer.");
   }
 
-  if (input.actualDiners === undefined || input.actualDiners < 0 || !Number.isInteger(input.actualDiners)) {
+  if (input.actualDiners !== undefined && (input.actualDiners < 0 || !Number.isInteger(input.actualDiners))) {
     errors.push("Actual diners must be a non-negative integer.");
   }
 
@@ -186,6 +188,11 @@ export class MealService {
       where: { status: "ACTIVE" },
     });
 
+    // Authoritative unique scan count from hostel app scanner
+    const uniqueScansCount = await hostelDataProvider.getUniqueDinerCount(mealId);
+    const totalScansCount = meal._count.scans;
+    const duplicateScansSuppressedCount = Math.max(0, totalScansCount - uniqueScansCount);
+
     // If unserved and prediction doesn't exist, calculate it
     let prediction = meal.prediction;
     if (!prediction && !meal.isServed) {
@@ -199,25 +206,53 @@ export class MealService {
       });
     }
 
+    // Determine authoritative actual diners and prediction error
+    let authoritativeActualDiners: number | null = null;
     let predictionError: number | null = null;
-    if (meal.outcome && prediction) {
+
+    if (meal.outcome) {
+      authoritativeActualDiners = meal.outcome.actualDiners;
+    } else if (uniqueScansCount > 0) {
+      authoritativeActualDiners = uniqueScansCount;
+    }
+
+    if (authoritativeActualDiners !== null && prediction?.predictedDiners) {
       predictionError = Math.round(
-        (Math.abs(meal.outcome.actualDiners - prediction.predictedDiners) /
-          (prediction.predictedDiners || 1)) *
+        (Math.abs(authoritativeActualDiners - prediction.predictedDiners) /
+          prediction.predictedDiners) *
           1000
       ) / 10;
     }
+
+    // Strict semantic separation:
+    // Actual prepared servings comes ONLY from verified kitchen audit outcome.
+    // Recommended preparation is a planning forecast, NOT actual preparation.
+    const actualPreparedServings = meal.outcome?.preparedServings ?? null;
+    const estimatedSurplus =
+      actualPreparedServings !== null && authoritativeActualDiners !== null
+        ? Math.max(0, actualPreparedServings - authoritativeActualDiners)
+        : null;
 
     return {
       meal,
       eligibleCount,
       prediction,
       predictionError,
+      uniqueScansCount,
+      duplicateScansSuppressedCount,
+      authoritativeActualDiners,
+      actualPreparedServings,
+      estimatedSurplus,
+      attendanceStatus:
+        uniqueScansCount === 0 && !meal.isServed && !meal.outcome
+          ? ("AWAITING_SCANS" as const)
+          : ("AVAILABLE" as const),
     };
   }
 
   /**
-   * Records meal outcome, strictly enforcing RBAC and validation.
+   * Records meal outcome (kitchen preparation and physical waste audit).
+   * Enforces server-side authorization and preserves authoritative scan-derived attendance.
    */
   async recordMealOutcome(
     input: RecordMealOutcomeInput,
@@ -239,32 +274,59 @@ export class MealService {
       throw new Error(`Meal with id '${input.mealId}' does not exist.`);
     }
 
-    // 3. Upsert meal outcome
+    // 3. Determine authoritative actual diners from scans vs demo fallback
+    let actualDiners: number;
+    let attendanceSource: string;
+
+    if (input.isDemoOverride && input.actualDiners !== undefined) {
+      actualDiners = input.actualDiners;
+      attendanceSource = "MANUAL_DEMO_OVERRIDE";
+    } else {
+      const scanCount = await hostelDataProvider.getUniqueDinerCount(input.mealId);
+      if (scanCount > 0) {
+        actualDiners = scanCount;
+        attendanceSource = "SCANNER_SYNC";
+      } else if (input.actualDiners !== undefined) {
+        actualDiners = input.actualDiners;
+        attendanceSource = "MANUAL_DEMO_OVERRIDE";
+      } else {
+        actualDiners = 0;
+        attendanceSource = "SCANNER_SYNC";
+      }
+    }
+
+    const estimatedSurplus = Math.max(0, input.preparedServings - actualDiners);
+
+    // 4. Upsert meal outcome
     const outcome = await prisma.mealOutcome.upsert({
       where: { mealId: input.mealId },
       create: {
         mealId: input.mealId,
         preparedServings: input.preparedServings,
-        actualDiners: input.actualDiners,
+        actualDiners,
+        attendanceSource,
         remainingServings: input.remainingServings,
         wastedServings: input.wastedServings,
+        estimatedSurplus,
       },
       update: {
         preparedServings: input.preparedServings,
-        actualDiners: input.actualDiners,
+        actualDiners,
+        attendanceSource,
         remainingServings: input.remainingServings,
         wastedServings: input.wastedServings,
+        estimatedSurplus,
         recordedAt: new Date(),
       },
     });
 
-    // 4. Mark meal as served
+    // 5. Mark meal as served
     await prisma.meal.update({
       where: { id: input.mealId },
       data: { isServed: true },
     });
 
-    // 5. Audit logging
+    // 6. Audit logging
     await prisma.auditLog.create({
       data: {
         action: "RECORD_MEAL_OUTCOME",
@@ -272,12 +334,14 @@ export class MealService {
         details: {
           mealId: input.mealId,
           preparedServings: input.preparedServings,
-          actualDiners: input.actualDiners,
+          actualDiners,
+          attendanceSource,
           remainingServings: input.remainingServings,
           wastedServings: input.wastedServings,
+          estimatedSurplus,
           predictedDiners: meal.prediction?.predictedDiners,
           predictionError: meal.prediction
-            ? Math.abs(input.actualDiners - meal.prediction.predictedDiners)
+            ? Math.abs(actualDiners - meal.prediction.predictedDiners)
             : null,
         },
       },
