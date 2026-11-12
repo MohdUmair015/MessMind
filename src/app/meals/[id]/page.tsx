@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { mealService } from "@/modules/meals/meal-service";
 import { Badge } from "@/components/ui/Badge";
 import { formatDate, cn } from "@/lib/utils";
 import { OutcomeRecordingForm } from "@/components/meals/OutcomeRecordingForm";
@@ -22,13 +21,29 @@ import {
   ChefHat,
 } from "lucide-react";
 
+export async function generateStaticParams() {
+  const { demoSnapshot } = await import("@/modules/demo-data/snapshot");
+  return demoSnapshot.mealsTimeline.map((meal) => ({
+    id: meal.id,
+  }));
+}
+
 export default async function MealDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const data = await mealService.getMealDetailById(id);
+  const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+  let data: any = null;
+  if (isDemo) {
+    const { demoDataProvider } = await import("@/modules/demo-data");
+    data = demoDataProvider.getMealDetailById(id);
+  } else {
+    const { mealService } = await import("@/modules/meals/meal-service");
+    data = await mealService.getMealDetailById(id);
+  }
 
   if (!data) {
     notFound();
@@ -371,7 +386,10 @@ export default async function MealDetailPage({
                       wastedServings: meal.outcome.wastedServings,
                       attendanceSource: meal.outcome.attendanceSource,
                       estimatedSurplus: meal.outcome.estimatedSurplus,
-                      recordedAt: meal.outcome.recordedAt.toISOString(),
+                      recordedAt:
+                        typeof meal.outcome.recordedAt === "string"
+                          ? meal.outcome.recordedAt
+                          : (meal.outcome.recordedAt as Date).toISOString(),
                     }
                   : null
               }

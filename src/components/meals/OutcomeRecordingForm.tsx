@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
-import { recordOutcomeAction } from "@/app/actions/meal-actions";
+import React, { useState, useTransition, useEffect } from "react";
+import { useDemo } from "@/modules/demo";
 import { CheckCircle2, AlertCircle, Loader2, Sparkles, ShieldAlert, QrCode } from "lucide-react";
 
 interface OutcomeRecordingFormProps {
@@ -27,7 +27,15 @@ export function OutcomeRecordingForm({
   authoritativeScansCount = 0,
   initialOutcome,
 }: OutcomeRecordingFormProps) {
+  const { demo } = useDemo();
   const [isPending, startTransition] = useTransition();
+
+  // In demo mode, dynamically react to scanner simulation if scans arrive
+  const effectiveScans = demo?.isDemoMode
+    ? demo.scannerState.uniqueScansCount > 0
+      ? demo.scannerState.uniqueScansCount
+      : authoritativeScansCount
+    : authoritativeScansCount;
 
   // Prepared servings defaults to existing outcome, or recommended prep with 5% safety buffer
   const [preparedServings, setPreparedServings] = useState<string>(
@@ -41,14 +49,21 @@ export function OutcomeRecordingForm({
   // Authoritative diners count from hostel scanner
   const defaultActualDiners = initialOutcome
     ? String(initialOutcome.actualDiners)
-    : authoritativeScansCount > 0
-    ? String(authoritativeScansCount)
+    : effectiveScans > 0
+    ? String(effectiveScans)
     : "99";
 
   const [actualDiners, setActualDiners] = useState<string>(defaultActualDiners);
   const [isManualOverride, setIsManualOverride] = useState<boolean>(
     initialOutcome?.attendanceSource === "MANUAL_DEMO_OVERRIDE"
   );
+
+  // When demo scans update in reactive state, sync actualDiners unless manually overridden
+  useEffect(() => {
+    if (demo?.isDemoMode && !isManualOverride && demo.scannerState.uniqueScansCount > 0) {
+      setActualDiners(String(demo.scannerState.uniqueScansCount));
+    }
+  }, [demo?.isDemoMode, demo?.scannerState.uniqueScansCount, isManualOverride]);
 
   const [remainingServings, setRemainingServings] = useState<string>(
     initialOutcome ? String(initialOutcome.remainingServings) : "9"
@@ -59,7 +74,11 @@ export function OutcomeRecordingForm({
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(
-    initialOutcome ? "Outcome record is currently saved in PostgreSQL." : null
+    initialOutcome
+      ? demo?.isDemoMode
+        ? "Outcome record is active in demo session."
+        : "Outcome record is currently saved in PostgreSQL."
+      : null
   );
 
   // Client-side calculations
@@ -109,6 +128,32 @@ export function OutcomeRecordingForm({
     }
 
     startTransition(async () => {
+      if (demo?.isDemoMode) {
+        const res = demo.recordOutcome({
+          mealId,
+          preparedServings: numPrepared,
+          actualDiners: numActual,
+          remainingServings: numRemaining,
+          wastedServings: numWasted,
+          isManualOverride,
+        });
+
+        if (res.success) {
+          setSuccessMessage(
+            "Kitchen outcome recorded in browser demo session (Surplus: " +
+              res.surplus +
+              ", Forecast Error: " +
+              res.forecastError +
+              "%). Not persisted to server."
+          );
+        } else {
+          setErrorMessage(res.error || "Failed to record outcome.");
+        }
+        return;
+      }
+
+      // Dynamic import keeps the static demo path 100% decoupled from server actions
+      const { recordOutcomeAction } = await import("@/app/actions/meal-actions");
       const res = await recordOutcomeAction({
         mealId,
         preparedServings: numPrepared,
@@ -312,7 +357,11 @@ export function OutcomeRecordingForm({
         {isPending ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin text-coral-400" />
-            <span>Saving Waste Audit to PostgreSQL...</span>
+            <span>
+              {demo?.isDemoMode
+                ? "Updating Demo Simulation State..."
+                : "Saving Waste Audit to PostgreSQL..."}
+            </span>
           </>
         ) : (
           <span>{initialOutcome ? "Update Waste Audit" : "Save Kitchen Waste Audit"}</span>

@@ -1,5 +1,3 @@
-import { mealService } from "@/modules/meals/meal-service";
-import { explanationService } from "@/modules/ai";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
@@ -24,10 +22,42 @@ import {
 } from "lucide-react";
 
 export default async function PredictionsPage() {
-  const upcomingData = await mealService.getUpcomingMealWithPrediction();
-  const targetMeal = upcomingData?.meal;
-  const prediction = upcomingData?.prediction;
-  const eligibleCount = upcomingData?.eligibleResidentsCount ?? 125;
+  const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+  let targetMeal: any = null;
+  let prediction: any = null;
+  let eligibleCount = 125;
+  let explanationResult: { explanation: string; source: "bedrock" | "fallback" } | null = null;
+
+  if (isDemo) {
+    const { demoDataProvider } = await import("@/modules/demo-data");
+    const upcomingData = demoDataProvider.getUpcomingMealWithPrediction();
+    targetMeal = upcomingData.meal;
+    prediction = upcomingData.prediction;
+    eligibleCount = upcomingData.eligibleResidentsCount;
+    if (prediction) {
+      explanationResult = {
+        explanation: prediction.explanation,
+        source: prediction.explanationSource,
+      };
+    }
+  } else {
+    const { mealService } = await import("@/modules/meals/meal-service");
+    const { explanationService } = await import("@/modules/ai");
+
+    const upcomingData = await mealService.getUpcomingMealWithPrediction();
+    targetMeal = upcomingData?.meal ?? null;
+    prediction = upcomingData?.prediction ?? null;
+    eligibleCount = upcomingData?.eligibleResidentsCount ?? 125;
+
+    if (targetMeal) {
+      try {
+        explanationResult = await explanationService.getExplanationForMeal(targetMeal.id);
+      } catch {
+        // Handled internally by explanationService
+      }
+    }
+  }
 
   const rawFactors = prediction?.predictionFactors as any;
   const weighted = rawFactors?.weightedFactors;
@@ -43,23 +73,14 @@ export default async function PredictionsPage() {
     : "4.4";
 
   // Behavioral weights from prediction
-  const pHist = weighted?.personalHistoricalRate !== undefined ? Math.round(weighted.personalHistoricalRate * 100) : 74;
+  const pHist = weighted?.personalHistoricalRate !== undefined ? Math.round(weighted.personalHistoricalRate * 100) : 71;
   const pDay = weighted?.dayOfWeekPatternRate !== undefined ? Math.round(weighted.dayOfWeekPatternRate * 100) : 71;
-  const pMeal = weighted?.mealTypePatternRate !== undefined ? Math.round(weighted.mealTypePatternRate * 100) : 70;
-  const pTrend = weighted?.recentAttendanceTrendRate !== undefined ? Math.round(weighted.recentAttendanceTrendRate * 100) : 73;
-  const pPref = weighted?.preferenceIntentionRate !== undefined ? Math.round(weighted.preferenceIntentionRate * 100) : 69;
+  const pMeal = weighted?.mealTypePatternRate !== undefined ? Math.round(weighted.mealTypePatternRate * 100) : 71;
+  const pTrend = weighted?.recentAttendanceTrendRate !== undefined ? Math.round(weighted.recentAttendanceTrendRate * 100) : 72;
+  const pPref = weighted?.preferenceIntentionRate !== undefined ? Math.round(weighted.preferenceIntentionRate * 100) : 75;
 
-  const menuAdj = bounded?.menuAdjustmentPercent ?? 5;
-  const trendAdj = bounded?.macroTrendAdjustmentPercent ?? 2;
-
-  let explanationResult = null;
-  if (targetMeal) {
-    try {
-      explanationResult = await explanationService.getExplanationForMeal(targetMeal.id);
-    } catch {
-      // Handled internally by explanationService
-    }
-  }
+  const menuAdj = bounded?.menuAdjustmentPercent ?? 1;
+  const trendAdj = bounded?.macroTrendAdjustmentPercent ?? 1;
 
   return (
     <div className="space-y-8 md:space-y-12">
@@ -411,7 +432,9 @@ export default async function PredictionsPage() {
           </div>
           <div>
             <strong className="text-charcoal-900 block mb-1">Zero AI Hallucination</strong>
-            All diner counts derive directly from PostgreSQL scans; no LLM invents operational numbers.
+            {isDemo
+              ? "All diner counts derive directly from recorded dining scans; no LLM invents operational numbers."
+              : "All diner counts derive directly from PostgreSQL scans; no LLM invents operational numbers."}
           </div>
         </div>
       </section>

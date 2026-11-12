@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useDemo } from "@/modules/demo";
 import { cn } from "@/lib/utils";
 import {
   UserCheck,
@@ -48,19 +49,32 @@ export function InteractiveFactorBreakdown({
   explanationSource,
   className,
 }: InteractiveFactorBreakdownProps) {
+  const { demo } = useDemo();
+
+  // In demo mode, dynamically track recalculations from shared reactive state
+  const activeWF = demo?.isDemoMode ? demo.prediction.predictionFactors.weightedFactors : weightedFactors;
+  const activeBA = demo?.isDemoMode ? demo.prediction.predictionFactors.boundedAdjustments : boundedAdjustments;
+  const activeExpected = demo?.isDemoMode ? demo.prediction.predictedDiners : expectedDiners;
+  const activeBaseline = demo?.isDemoMode ? demo.prediction.predictionFactors.historicalBaselineDiners : historicalBaselineDiners;
+  const activeExplanation = demo?.isDemoMode ? demo.prediction.explanation : explanation;
+  const activeSource = demo?.isDemoMode ? demo.prediction.explanationSource : explanationSource;
+  const activeCV = demo?.isDemoMode && demo.prediction.predictionFactors.confidenceMetrics?.calculatedCoefficientOfVariation !== undefined
+    ? Number((demo.prediction.predictionFactors.confidenceMetrics.calculatedCoefficientOfVariation * 100).toFixed(1))
+    : confidenceCV;
+
   // Open the primary signal by default to demonstrate the disclosure immediately
   const [expandedFactor, setExpandedFactor] = useState<string | null>("personal");
   const [showTechnicalMath, setShowTechnicalMath] = useState(false);
 
   // Dynamic rates extracted from actual prediction object
-  const pHist = weightedFactors?.personalHistoricalRate ?? null;
-  const pDay = weightedFactors?.dayOfWeekPatternRate ?? null;
-  const pMeal = weightedFactors?.mealTypePatternRate ?? null;
-  const pTrend = weightedFactors?.recentAttendanceTrendRate ?? null;
-  const pPref = weightedFactors?.preferenceIntentionRate ?? null;
+  const pHist = activeWF?.personalHistoricalRate ?? null;
+  const pDay = activeWF?.dayOfWeekPatternRate ?? null;
+  const pMeal = activeWF?.mealTypePatternRate ?? null;
+  const pTrend = activeWF?.recentAttendanceTrendRate ?? null;
+  const pPref = activeWF?.preferenceIntentionRate ?? null;
 
-  const menuAdj = boundedAdjustments?.menuAdjustmentPercent ?? null;
-  const trendAdj = boundedAdjustments?.macroTrendAdjustmentPercent ?? null;
+  const menuAdj = activeBA?.menuAdjustmentPercent ?? null;
+  const trendAdj = activeBA?.macroTrendAdjustmentPercent ?? null;
 
   const factors = [
     {

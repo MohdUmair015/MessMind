@@ -1,0 +1,96 @@
+name: Build & Deploy Static Demo
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy verified static build to GitHub Pages"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build & Verify Static Demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies from package-lock.json
+        run: npm ci
+
+      - name: Generate Prisma client types (for TypeScript type checking)
+        run: npx prisma generate
+
+      - name: Run verification test suites (60 passing tests)
+        run: |
+          npx tsx --test \
+            src/modules/prediction/__tests__/deterministic-engine.test.ts \
+            src/modules/demo-data/__tests__/demo-data.test.ts \
+            src/modules/demo/__tests__/demo-simulation.test.ts
+
+      - name: Build static demo for GitHub Pages
+        env:
+          NEXT_PUBLIC_DEMO_MODE: "true"
+        run: npm run build
+
+      - name: Verify static export output structure
+        run: |
+          test -d out || { echo "ERROR: Missing out/ directory"; exit 1; }
+          test -f out/index.html || { echo "ERROR: Missing out/index.html"; exit 1; }
+          test -f out/404.html || { echo "ERROR: Missing out/404.html"; exit 1; }
+          test -f out/meals/index.html || { echo "ERROR: Missing out/meals/index.html"; exit 1; }
+          test -f out/predictions/index.html || { echo "ERROR: Missing out/predictions/index.html"; exit 1; }
+          test -f out/analytics/index.html || { echo "ERROR: Missing out/analytics/index.html"; exit 1; }
+          test -f out/admin/index.html || { echo "ERROR: Missing out/admin/index.html"; exit 1; }
+          test -f out/meals/meal-target-saturday-dinner/index.html || { echo "ERROR: Missing target meal export"; exit 1; }
+          echo "Static export verified successfully with all canonical routes and assets."
+
+      - name: Upload inspection artifact (Downloadable ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: messmind-static-build
+          path: ./out
+          retention-days: 7
+
+      - name: Package GitHub Pages deployment artifact
+        if: github.event_name == 'workflow_dispatch' && (inputs.deploy == true || inputs.deploy == 'true')
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./out
+
+  deploy:
+    name: Deploy to GitHub Pages (Manual Approval Required)
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && (inputs.deploy == true || inputs.deploy == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy static artifact to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

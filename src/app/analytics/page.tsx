@@ -1,4 +1,3 @@
-import { analyticsService } from "@/modules/analytics/analytics-service";
 import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { DemandAccuracyChart } from "@/components/analytics/DemandAccuracyChart";
@@ -17,7 +16,16 @@ import {
 } from "lucide-react";
 
 export default async function AnalyticsPage() {
-  const analytics = await analyticsService.getAnalyticsSummary();
+  const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+  let analytics: any = null;
+
+  if (isDemo) {
+    const { demoDataProvider } = await import("@/modules/demo-data");
+    analytics = demoDataProvider.getAnalyticsSummary();
+  } else {
+    const { analyticsService } = await import("@/modules/analytics/analytics-service");
+    analytics = await analyticsService.getAnalyticsSummary();
+  }
 
   return (
     <div className="space-y-8 md:space-y-12">
@@ -31,11 +39,15 @@ export default async function AnalyticsPage() {
             Analytics & Accuracy Story
           </h1>
           <p className="text-base text-charcoal-600 mt-1 break-words">
-            Empirical prediction accuracy, kitchen preparation efficiency, and food waste trends from PostgreSQL.
+            {isDemo
+              ? "Empirical prediction accuracy, kitchen preparation efficiency, and food waste trends from synthetic benchmark."
+              : "Empirical prediction accuracy, kitchen preparation efficiency, and food waste trends from PostgreSQL."}
           </p>
         </div>
         <Badge variant="coral" size="sm" className="shrink-0 self-start sm:self-auto">
-          Aggregated from PostgreSQL ({analytics.totalOutcomesRecorded} meals)
+          {isDemo
+            ? `Synthetic Benchmark (${analytics.totalOutcomesRecorded} meals)`
+            : `Aggregated from PostgreSQL (${analytics.totalOutcomesRecorded} meals)`}
         </Badge>
       </div>
 
@@ -180,7 +192,7 @@ export default async function AnalyticsPage() {
         </div>
 
         <div className="divide-y divide-surface-border overflow-x-auto min-w-0">
-          {analytics.recentOutcomeComparisons.slice(0, 10).map((row, idx) => {
+          {analytics.recentOutcomeComparisons.slice(0, 10).map((row: any, idx: number) => {
             const isAccurate = row.errorPercent !== null && row.errorPercent <= 5.0;
 
             return (

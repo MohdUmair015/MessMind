@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useDemoAuth } from "@/modules/auth/client-context";
+import { useDemo } from "@/modules/demo";
 import {
   Compass,
   BrainCircuit,
@@ -75,6 +76,8 @@ const NAVIGATION: NavSection[] = [
 export function AppSidebar() {
   const pathname = usePathname();
   const { isAdmin } = useDemoAuth();
+  const { demo } = useDemo();
+  const isDemo = demo?.isDemoMode ?? false;
 
   return (
     <aside className="hidden md:flex w-64 lg:w-68 bg-[#FAF6F0] text-charcoal-800 flex-col flex-shrink-0 min-h-screen border-r border-surface-border select-none">
@@ -155,13 +158,20 @@ export function AppSidebar() {
       {/* Bottom Status / Demo Info */}
       <div className="p-4 border-t border-surface-border/80 bg-[#F4EDE2]/50">
         <div className="p-3 bg-white rounded-2xl border border-surface-border/90 shadow-2xs flex items-center gap-3">
-          <div className="w-2.5 h-2.5 rounded-full bg-mint-500 flex-shrink-0 animate-pulse" />
+          <div
+            className={cn(
+              "w-2.5 h-2.5 rounded-full flex-shrink-0 animate-pulse",
+              isDemo ? "bg-mango-500" : "bg-mint-500"
+            )}
+          />
           <div className="min-w-0">
             <div className="text-xs font-bold text-charcoal-900 truncate">
-              Dining Scanner Connected
+              {isDemo ? "Simulated Dining Scanner" : "Dining Scanner Connected"}
             </div>
             <div className="text-[11px] text-charcoal-600 truncate">
-              PostgreSQL · 125 Residents
+              {isDemo
+                ? "Simulated Feed · No Live Database"
+                : "PostgreSQL · 125 Residents"}
             </div>
           </div>
         </div>

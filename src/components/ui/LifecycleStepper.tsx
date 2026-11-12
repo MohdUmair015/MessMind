@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useDemo, calculateForecastErrorPercent } from "@/modules/demo";
 import { cn } from "@/lib/utils";
 import { BrainCircuit, ChefHat, QrCode, TrendingUp, CheckCircle2, Sparkles, ArrowRight, RefreshCw } from "lucide-react";
 
@@ -23,7 +24,27 @@ export function LifecycleStepper({
   predictionError,
   className,
 }: LifecycleStepperProps) {
-  const [inspectedStage, setInspectedStage] = useState<LifecycleStage | "NEXT">(currentStage);
+  const { demo } = useDemo();
+
+  // In demo mode, dynamically track reactive state across scanner simulation, outcome, and buffer recalculations
+  const effectiveStage = demo?.isDemoMode ? demo.lifecycleStage : currentStage;
+  const effectivePredicted = demo?.isDemoMode ? demo.prediction.predictedDiners : predictedDiners;
+  const effectiveRecommended = demo?.isDemoMode ? demo.prediction.recommendedServings : recommendedServings;
+  const effectiveScans = demo?.isDemoMode
+    ? demo.scannerState.uniqueScansCount > 0
+      ? demo.scannerState.uniqueScansCount
+      : actualScans
+    : actualScans;
+
+  const effectiveError = demo?.isDemoMode && effectiveScans
+    ? calculateForecastErrorPercent(effectiveScans, effectivePredicted)
+    : predictionError;
+
+  const [inspectedStage, setInspectedStage] = useState<LifecycleStage | "NEXT">(effectiveStage);
+
+  useEffect(() => {
+    setInspectedStage(effectiveStage);
+  }, [effectiveStage]);
 
   const stages: Array<{
     id: LifecycleStage | "NEXT";
@@ -36,36 +57,36 @@ export function LifecycleStepper({
     {
       id: "PREDICT",
       label: "Predict",
-      sublabel: `${predictedDiners} expected diners`,
+      sublabel: `${effectivePredicted} expected diners`,
       description: "Deterministic demand prediction",
-      detail: `Aggregates 40% personal history, 20% day pattern, 15% dinner service, 15% recent trend, and 10% opt-in intention to compute ${predictedDiners} expected diners.`,
+      detail: `Aggregates 40% personal history, 20% day pattern, 15% dinner service, 15% recent trend, and 10% opt-in intention to compute ${effectivePredicted} expected diners.`,
       icon: BrainCircuit,
     },
     {
       id: "PREPARE",
       label: "Prepare",
-      sublabel: `${recommendedServings} servings (+5%)`,
+      sublabel: `${effectiveRecommended} servings (+5%)`,
       description: "Kitchen safety guidance",
-      detail: `Adds a calibrated +5% safety buffer (${recommendedServings} portions) to prevent food shortages during unexpected diner rushes without overcooking.`,
+      detail: `Adds a calibrated safety buffer (${effectiveRecommended} portions) to prevent food shortages during unexpected diner rushes without overcooking.`,
       icon: ChefHat,
     },
     {
       id: "OBSERVE",
       label: "Observe",
-      sublabel: actualScans !== null && actualScans !== undefined ? `${actualScans} scans verified` : "Dining room syncing",
+      sublabel: effectiveScans !== null && effectiveScans !== undefined ? `${effectiveScans} scans verified` : "Dining room syncing",
       description: "Dining room scanner sync",
-      detail: actualScans !== null && actualScans !== undefined
-        ? `Hostel app scanner captured ${actualScans} unique dining scans upon entry. Management enters zero manual counts.`
+      detail: effectiveScans !== null && effectiveScans !== undefined
+        ? `Hostel app scanner captured ${effectiveScans} unique dining scans upon entry. Management enters zero manual counts.`
         : "Residents scan upon entering the mess hall via the hostel mobile app. Actual attendance syncs automatically.",
       icon: QrCode,
     },
     {
       id: "LEARN",
       label: "Learn",
-      sublabel: predictionError !== null && predictionError !== undefined ? `${predictionError}% variance` : "Awaiting meal audit",
+      sublabel: effectiveError !== null && effectiveError !== undefined ? `${effectiveError}% variance` : "Awaiting meal audit",
       description: "Closed feedback loop",
-      detail: predictionError !== null && predictionError !== undefined
-        ? `Observed attendance variance of ${predictionError}% is logged to PostgreSQL, updating individual and cohort rolling weights.`
+      detail: effectiveError !== null && effectiveError !== undefined
+        ? `Observed attendance variance of ${effectiveError}% is logged, updating individual and cohort rolling weights.`
         : "Post-meal leftovers and scanner attendance calculate the model error and update behavioral parameters.",
       icon: TrendingUp,
     },
@@ -87,7 +108,7 @@ export function LifecycleStepper({
     NEXT: 4,
   };
 
-  const currentOrder = stageOrder[currentStage];
+  const currentOrder = stageOrder[effectiveStage];
   const activeInspected = stages.find((s) => s.id === inspectedStage) || stages[currentOrder];
 
   return (

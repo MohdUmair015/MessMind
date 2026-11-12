@@ -1,8 +1,4 @@
 import Link from "next/link";
-import { mealService } from "@/modules/meals/meal-service";
-import { analyticsService } from "@/modules/analytics/analytics-service";
-import { hostelDataProvider } from "@/modules/integration";
-import { explanationService } from "@/modules/ai";
 import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
@@ -24,12 +20,55 @@ import {
 } from "lucide-react";
 
 export default async function DashboardPage() {
-  const upcomingData = await mealService.getUpcomingMealWithPrediction();
-  const analytics = await analyticsService.getAnalyticsSummary();
+  const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
-  const targetMeal = upcomingData?.meal;
-  const prediction = upcomingData?.prediction;
-  const eligibleCount = upcomingData?.eligibleResidentsCount ?? 125;
+  let targetMeal: any = null;
+  let prediction: any = null;
+  let eligibleCount = 125;
+  let analytics: any = null;
+  let uniqueScansCount = 0;
+  let duplicateScansCount = 0;
+  let explanationResult: { explanation: string; source: "bedrock" | "fallback" } | null = null;
+
+  if (isDemo) {
+    const { demoDataProvider } = await import("@/modules/demo-data");
+    const upcomingData = demoDataProvider.getUpcomingMealWithPrediction();
+    analytics = demoDataProvider.getAnalyticsSummary();
+    targetMeal = upcomingData.meal;
+    prediction = upcomingData.prediction;
+    eligibleCount = upcomingData.eligibleResidentsCount;
+    uniqueScansCount = demoDataProvider.getUniqueDinerCount(targetMeal.id);
+    duplicateScansCount = Math.max(0, targetMeal._count.scans - uniqueScansCount);
+    if (prediction) {
+      explanationResult = {
+        explanation: prediction.explanation,
+        source: prediction.explanationSource,
+      };
+    }
+  } else {
+    const { mealService } = await import("@/modules/meals/meal-service");
+    const { analyticsService } = await import("@/modules/analytics/analytics-service");
+    const { hostelDataProvider } = await import("@/modules/integration");
+    const { explanationService } = await import("@/modules/ai");
+
+    const upcomingData = await mealService.getUpcomingMealWithPrediction();
+    analytics = await analyticsService.getAnalyticsSummary();
+    targetMeal = upcomingData?.meal ?? null;
+    prediction = upcomingData?.prediction ?? null;
+    eligibleCount = upcomingData?.eligibleResidentsCount ?? 125;
+
+    if (targetMeal) {
+      uniqueScansCount = await hostelDataProvider.getUniqueDinerCount(targetMeal.id);
+      const totalScans = targetMeal._count.scans;
+      duplicateScansCount = Math.max(0, totalScans - uniqueScansCount);
+
+      try {
+        explanationResult = await explanationService.getExplanationForMeal(targetMeal.id);
+      } catch {
+        // ExplanationService already handles fallback internally
+      }
+    }
+  }
 
   const rawFactors = prediction?.predictionFactors as any;
   const weighted = rawFactors?.weightedFactors;
@@ -38,22 +77,6 @@ export default async function DashboardPage() {
   const menuItems = Array.isArray(targetMeal?.menu?.items)
     ? (targetMeal.menu.items as string[])
     : [];
-
-  let uniqueScansCount = 0;
-  let duplicateScansCount = 0;
-  let explanationResult = null;
-
-  if (targetMeal) {
-    uniqueScansCount = await hostelDataProvider.getUniqueDinerCount(targetMeal.id);
-    const totalScans = targetMeal._count.scans;
-    duplicateScansCount = Math.max(0, totalScans - uniqueScansCount);
-
-    try {
-      explanationResult = await explanationService.getExplanationForMeal(targetMeal.id);
-    } catch {
-      // ExplanationService already handles fallback internally
-    }
-  }
 
   // Determine current lifecycle stage
   let currentStage: LifecycleStage = "PREDICT";
@@ -261,7 +284,9 @@ export default async function DashboardPage() {
               Long-Term Prediction Accuracy & Efficiency
             </h3>
             <p className="text-xs md:text-sm text-charcoal-600 mt-0.5 break-words">
-              Verified historical accuracy evaluated strictly from recorded scanner outcomes in PostgreSQL.
+              {isDemo
+                ? "Verified historical accuracy evaluated strictly from recorded dining scanner outcomes."
+                : "Verified historical accuracy evaluated strictly from recorded scanner outcomes in PostgreSQL."}
             </p>
           </div>
           <Link

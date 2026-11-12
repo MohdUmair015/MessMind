@@ -1,249 +1,412 @@
-# MessMind | Hostel Food-Demand Intelligence
+# MessMind — Hostel Food Demand Intelligence
 
-> **DEMO ENVIRONMENT DISCLAIMER**  
-> **Demo environment — simulated data.**  
-> The prototype operates using a synthetic population of **125 simulated residents** (50 student residents and 75 corporate residents) and generated historical logs across a 90-day window. These figures are for demonstration purposes and do NOT represent actual hostel residents.
+[![Next.js](https://img.shields.io/badge/Next.js-15.1-black?logo=next.js)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19.0-blue?logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38B2AC?logo=tailwind-css)](https://tailwindcss.com/)
+[![Prisma](https://img.shields.io/badge/Prisma-6.3-2D3748?logo=prisma)](https://www.prisma.io/)
+[![Tests](https://img.shields.io/badge/Tests-60_Passing-10B981)](#8-automated-testing--verification)
+[![Deployment Target](https://img.shields.io/badge/GitHub_Pages-Deployment_Target-FF6B4A?logo=github-pages)](https://mohdumair015.github.io/MessMind/)
 
----
-
-## 1. Overview & Problem Statement
-
-In student and corporate hostel accommodations, kitchen teams must decide **how much food to cook hours BEFORE meal service begins**. 
-
-Traditional hostel management software records dining hall entry logs when residents actually eat. However, this only tells management what *already happened*.
-**MessMind provides a management-side intelligence layer that predicts what is *likely to happen*.**
-
-MessMind provides kitchen managers with:
-1. **Expected Diners**: Sum of individual resident attendance probabilities computed deterministically.
-2. **Recommended Preparation**: Actionable cook volume incorporating a configurable safety buffer (default 5%).
-3. **Waste Risk Classification**: Early detection of overpreparation risk (`LOW`, `MEDIUM`, `HIGH`) based on historical variance and leftover audits.
-4. **Prediction Confidence Rating**: Dynamic confidence assessment using the empirical Coefficient of Variation (CV) from comparable historical services.
-5. **Manager-Friendly Explanations**: Natural language operational summaries generated via **Amazon Bedrock** (using strictly anonymized aggregate factors with a deterministic fallback).
-
-Post-meal, actual unique scanner attendance and physical kitchen waste audits are recorded to establish a closed learning loop:
-$$\text{PREDICT} \longrightarrow \text{PREPARE} \longrightarrow \text{OBSERVE} \longrightarrow \text{RECONCILE} \longrightarrow \text{LEARN}$$
-
-MessMind does **not** replace the existing hostel application. It is a management-side intelligence module designed to ingest data from and integrate with existing hostel platforms.
+> **Deployment Target Notice**:<br />
+> The intended GitHub Pages deployment target for the static demonstration is:<br />
+> **[`https://mohdumair015.github.io/MessMind/`](https://mohdumair015.github.io/MessMind/)**<br />
+> *(Current status: NOT DEPLOYED / BUILD-VERIFIED ONLY. This URL represents the configured publication target; see [Deployment Guide](DEPLOYMENT.md) for workflow details.)*
 
 ---
 
-## 2. Technology Stack
-
-- **Frontend & App Framework**: Next.js 15 (App Router), React 19, TypeScript
-- **Styling**: Tailwind CSS (Warm Ivory, Coral `#FF6B4A`, and Mint `#10B981` palette tailored for food operations)
-- **Icons**: Lucide React
-- **Data Visualization**: Recharts
-- **Database**: PostgreSQL / Amazon RDS
-- **ORM & Data Access**: Prisma ORM
-- **Backend Architecture**: Modular Monolith via Next.js Server Actions & API Route Handlers
-- **AI Explanation Layer**: **Amazon Bedrock** (Converse API) using standard AWS credential provider chain (strictly for natural language explanation; never used for numerical prediction; equipped with deterministic fallback)
-- **Target Deployment Platform**: AWS Amplify (Hosting) + Amazon RDS for PostgreSQL
+## Table of Contents
+- [1. Project Overview & Problem Statement](#1-project-overview--problem-statement)
+  - [Authoritative Attendance vs. Food Waste Semantics](#authoritative-attendance-vs-food-waste-semantics)
+- [2. Dual-Mode Architecture](#2-dual-mode-architecture)
+  - [Capability Comparison](#capability-comparison)
+- [3. Core Features & Application Views](#3-core-features--application-views)
+- [4. Deterministic Prediction Methodology](#4-deterministic-prediction-methodology)
+- [5. Explainable AI & Privacy Boundaries](#5-explainable-ai--privacy-boundaries)
+- [6. Synthetic Data & Simulation Disclosures](#6-synthetic-data--simulation-disclosures)
+  - [Verified Benchmark Data](#verified-benchmark-data)
+- [7. Local Development Instructions](#7-local-development-instructions)
+  - [Option A: Static Demo Mode (Zero Database)](#option-a-static-demo-mode-zero-database-required)
+  - [Option B: Full-Stack Mode (PostgreSQL + Prisma)](#option-b-full-stack-mode-postgresql--prisma)
+- [8. Automated Testing & Verification](#8-automated-testing--verification)
+- [9. GitHub Pages Static Build & CI/CD Pipeline](#9-github-pages-static-build--cicd-pipeline)
+- [10. Database Schema & Full-Stack Reference](#10-database-schema--full-stack-reference)
+- [11. License & Project Disclosures](#11-license--project-disclosures)
 
 ---
 
-## 3. Architecture & Integration Boundary
+## 1. Project Overview & Problem Statement
 
-MessMind is structured as a **modular monolith** with a decoupled server-side integration boundary:
+In student and corporate hostel accommodations, kitchen teams face a daily operational dilemma: **they must decide how much food to prepare hours before meal service begins**.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Existing Hostel App                      │
-│      (Dining Scanner QR/RFID, Resident Preferences, Menus)   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                IHostelMealDataProvider Interface
-                               │
-                ┌──────────────┴──────────────┐
-                ▼                             ▼
-   SimulatedHostelMealDataProvider   FutureRealHostelAppProvider
-   (Synthetic PostgreSQL Stand-In)   (mTLS/OAuth2 REST API Adapter)
-                └──────────────┬──────────────┘
-                               │ Normalized Domain DTOs
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   MessMind Modular Monolith                 │
-│                                                             │
-│   ┌─────────────────────────────────────────────────────┐   │
-│   │                 Next.js App Router (UI)             │   │
-│   │   - Dashboard (Current service, prep guidance)      │   │
-│   │   - Predictions (Probability breakdown & factors)   │   │
-│   │   - Meals (Timeline schedule, scanner sync, audit)  │   │
-│   │   - Analytics (Accuracy story, MAPE, surplus/waste) │   │
-│   │   - Admin (Cohorts, algorithms, RBAC, audit policy) │   │
-│   └──────────────────────────┬──────────────────────────┘   │
-│                              │                              │
-│   ┌──────────────────────────▼──────────────────────────┐   │
-│   │               Server-Side Modules                   │   │
-│   │                                                     │   │
-│   │   ┌────────────────────────┐  ┌─────────────────┐   │   │
-│   │   │   Prediction Engine    │  │ Amazon Bedrock  │   │   │
-│   │   │ (Deterministic Engine) │  │  (NL Explainer) │   │   │
-│   │   └───────────┬────────────┘  └────────┬────────┘   │   │
-│   │               │                        │            │   │
-│   │   ┌───────────▼────────────────────────▼────────┐   │   │
-│   │   │           Domain & Security Layer           │   │   │
-│   │   │       (RBAC server validation, Auditing)    │   │   │
-│   │   └───────────────────────┬─────────────────────┘   │   │
-│   └───────────────────────────┼─────────────────────────┘   │
-│                               │                             │
-│   ┌───────────────────────────▼─────────────────────────┐   │
-│   │                   Prisma ORM Client                 │   │
-│   │   └───────────────────────┬─────────────────────────┘   │
-└───────────────────────────────┼─────────────────────────────┘
-                                ▼
-              PostgreSQL / Amazon RDS (AWS Target)
+Traditional hostel management software only records dining hall entry logs after residents scan their cards or QR codes. However, attendance records only indicate what *already happened*. Cooking too much food results in unnecessary operational costs and discarded food; cooking too little leads to food shortages, resident dissatisfaction, and emergency cooking.
+
+**MessMind** is a management-side demand intelligence module that predicts what is *likely to happen*. It ingests historical attendance logs, menu characteristics, and pre-meal resident opt-ins to compute deterministic demand forecasts and recommended cooking quantities.
+
+```mermaid
+flowchart LR
+    A["1. PREDICT<br/>Individual probabilities<br/>Expected diners computed"] --> B["2. PREPARE<br/>Apply 5% safety buffer<br/>Kitchen cooks recommendation"]
+    B --> C["3. OBSERVE<br/>Physical scanner sync<br/>Unique attendance captured"]
+    C --> D["4. RECONCILE<br/>Variance computed<br/>Waste audit logged"]
+    D --> E["5. LEARN<br/>Residual error evaluated<br/>Closed-loop model update"]
+    E --> A
 ```
 
-### Data Feed Simulation Disclaimer
-> **IMPORTANT ARCHITECTURAL NOTICE:**  
-> For demonstration and local testing, the hostel application's data feed is simulated using synthetic PostgreSQL records. In production, the provider connects to authorized hostel dining hardware/APIs. We do NOT claim that a live production hostel API integration exists yet.
-
-### Authoritative Attendance vs Food Waste Semantics
-1. **Source of Truth for Attendance**:
-   - `actualDiners` = Count of **unique resident meal scans** captured at dining entry.
-   - Mess managers **never manually type attendance**.
-   - If a resident scans multiple times, duplicates are automatically suppressed ($Set<ResidentId>$).
-2. **Clear Separation of Semantics**:
-   - **A. Predicted Demand**: Expected diners $\sum P(R_i)$.
-   - **B. Recommended Preparation**: Expected diners $+ 5\%$ safety buffer.
-   - **C. Attendance**: Actual unique meal scans recorded at dining entrance.
-   - **D. Estimated Surplus**: $\text{Prepared Servings} - \text{Actual Scans}$ (when preparation is known).
-   - **E. Physical Food Waste**: Only calculated when a physical kitchen audit or smart scale provides leftover/discarded measurements. **Meal scans alone are NEVER claimed to measure physical food waste.**
+### Authoritative Attendance vs. Food Waste Semantics
+MessMind enforces strict domain semantics across all calculations:
+- **Predicted Demand**: The statistical expectation $\sum_{i=1}^{N} P(R_i)$ of resident attendance.
+- **Recommended Preparation**: Predicted demand plus a configurable kitchen safety buffer (default $5\%$).
+- **Actual Attendance**: The count of **authoritative, unique resident meal scans** recorded at the dining room entrance. Duplicate scans by the same resident are automatically suppressed.
+- **Estimated Surplus / Leftover Portions**: $\text{Prepared Servings} - \text{Actual Diners}$. These represent unserved food portions.
+- **Physical Food Waste**: Food discarded after service, verified through physical kitchen audit measurements. **Remaining food portions are never assumed to be wasted food**; unconsumed portions can often be repurposed or preserved under food-safety protocols.
 
 ---
 
-## 4. Database Structure
+## 2. Dual-Mode Architecture
 
-The database schema (`prisma/schema.prisma`) models the operational entities:
+MessMind is architected to operate in two distinct modes without code divergence:
 
-- **`Resident`**: Tracks `residentCode`, `residentType` (`STUDENT`, `CORPORATE`), and status.
-- **`Menu`**: Meal offerings with category and item list.
-- **`Meal`**: Scheduled meal by `mealDate` and `mealType` (`BREAKFAST`, `LUNCH`, `DINNER`).
-- **`MealPreference`**: Resident pre-meal selections and opt-in indicators.
-- **`MealScan`**: Timestamped physical scan events captured at dining entry.
-- **`MealOutcome`**: Verified kitchen preparation, attendance count, remaining servings, and wasted servings.
-- **`Prediction`**: Predicted diners, recommended servings, waste risk, confidence rating, structured JSON factors, and cached natural language explanations.
-- **`PredictionSetting`**: Configurable buffer percentage (default 5%) and waste risk thresholds.
-- **`AuditLog`**: Server-side audit trail for administrative updates, sync actions, and outcome logs.
+1. **Static Demo Mode (GitHub Pages Target)**: A completely decoupled, browser-safe static deployment. It runs on synthetic benchmark data (125 residents, 205 historical meals) with an in-memory simulation controller and pure deterministic calculation engine. It requires **no PostgreSQL database, no Docker containers, no AWS credentials, and no Node.js runtime**.
+2. **Full-Stack Application Mode**: The comprehensive enterprise implementation backed by PostgreSQL, Prisma ORM, Next.js Server Actions, role-based access control, and an optional Amazon Bedrock Converse API integration for natural language explanation generation.
+
+```mermaid
+flowchart TD
+    subgraph ClientLayer["Frontend Presentation (Next.js 15 App Router & React 19)"]
+        UI["Application Views: Overview · Meals · Predictions · Analytics · Admin"]
+        SimCtrl["Client Simulation Controller<br/>(In-Memory React Context)"]
+        RoleSwitch["Client Role Switcher<br/>(MESS_MANAGER / HOSTEL_ADMIN)"]
+    end
+
+    subgraph StaticPath["Static Demo Mode (NEXT_PUBLIC_DEMO_MODE=true)"]
+        Snapshot["Canonical Static Snapshot<br/>(125 Residents · 205 Evaluated Meals)"]
+        PureEngine["Pure Deterministic Engine<br/>(Browser-Safe Math)"]
+        PureExplainer["Deterministic Fallback Explainer<br/>(Zero-Network Template Engine)"]
+    end
+
+    subgraph FullStackPath["Full-Stack Production Mode (Default / Node.js Runtime)"]
+        ServerActions["Server Actions & API Routes<br/>(requireServerRole RBAC)"]
+        DBEngine["Deterministic Prediction Engine<br/>(Prisma Data Ingestion)"]
+        Bedrock["Amazon Bedrock Converse API<br/>(Aggregate Factor NL Explainer)"]
+        Prisma["Prisma ORM Client"]
+        Postgres[("PostgreSQL Database / Amazon RDS")]
+    end
+
+    UI -->|Demo Mode| SimCtrl
+    SimCtrl --> Snapshot
+    SimCtrl --> PureEngine
+    SimCtrl --> PureExplainer
+
+    UI -->|Full-Stack Mode| ServerActions
+    ServerActions --> DBEngine
+    ServerActions --> Bedrock
+    DBEngine --> Prisma
+    Prisma --> Postgres
+```
+
+### Capability Comparison
+
+| Operational Feature | Static Demo Mode (GitHub Pages) | Full-Stack Application Mode |
+| :--- | :--- | :--- |
+| **Execution Environment** | Client browser CDN (Static Export) | Node.js Server Runtime (Next.js App Router) |
+| **Database Dependency** | **None** (Zero PostgreSQL / Docker) | PostgreSQL 16 (Local or Amazon RDS) |
+| **ORM & Persistence** | Static snapshot + in-memory state | Prisma ORM with relational schema |
+| **Prediction Calculation** | `PureDeterministicPredictionEngine` | `DeterministicPredictionEngine` (DB queries) |
+| **Target Saturday Dinner Forecast** | 90 expected diners, 95 prep (canonical) | Computed dynamically from PostgreSQL logs |
+| **Safety Buffer Recalculation** | Interactive browser recalculation (0%–15%) | Recalculated and persisted to PostgreSQL |
+| **Attendance Ingestion** | Simulated feed (99 scans, +9 variance) | Authoritative hardware scanner integration |
+| **Waste Audit Recording** | Validated in active browser session | Persisted to `meal_outcomes` table |
+| **Natural Language Explanations** | Deterministic browser template explainer | Amazon Bedrock Converse API (with fallback) |
+| **Authentication & RBAC** | Client presentation preview toggle | Server-enforced role verification |
 
 ---
 
-## 5. Prediction Methodology
+## 3. Core Features & Application Views
 
-The prediction engine is strictly **deterministic and data-driven**. 
+MessMind features six distinct operational views:
 
-1. **Individual Attendance Probabilities**:
-   For each active resident, an attendance probability $P(R_i)$ is computed using established weights:
-   - **Personal Historical Attendance**: 40%
-   - **Day-of-Week Pattern**: 20%
-   - **Meal-Type Pattern**: 15%
-   - **Recent Trend (Last 14 days)**: 15%
-   - **Current Preference Signal**: 10%
+### 1. Operations Overview (`/MessMind/`)
+The daily command center for kitchen managers.
+- **Hero Recommendation**: Displays the primary decision metric: expected diners (90) and recommended preparation (95 servings) with active buffer percentage.
+- **Live Dining Room Scanner**: Shows real-time attendee pacing via an animated SVG status ring, tracking arrival count versus forecast and variance.
+- **Closed Learning Loop Highlights**: Displays top-level historical performance (4.2% MAPE, 92.5% accuracy rate, 2.6% average waste).
 
-2. **Bounded Adjustments**:
-   - Menu appeal impact is clamped strictly to $[-10\%, +10\%]$.
-   - Macro attendance trend drift is clamped strictly to $[-10\%, +10\%]$.
+### 2. Meals Timeline (`/MessMind/meals/`)
+A chronological schedule of hostel dining services.
+- **Service Schedule**: Lists 21 canonical services spanning breakfast, lunch, and dinner.
+- **Interactive Filtering**: Client-side filtering across *All Services (21)*, *Upcoming (1)*, and *Completed (20)* with synchronized query parameters (`?filter=upcoming`) and zero page reload.
+- **Saturday Rhythm Callout**: Highlights operational trends specific to weekend services.
 
-3. **Sparse-Data Fallback Hierarchy**:
-   When residents lack deep history, the engine falls back gracefully:
-   $$\text{Resident + Day + Meal + Menu} \longrightarrow \text{Resident + Day + Meal} \longrightarrow \text{Resident + Meal} \longrightarrow \text{Cohort Baseline}$$
+### 3. Meal Details & Service Reconciliation (`/MessMind/meals/[id]/`)
+Deep-dive view for specific scheduled or historical services.
+- **Target Saturday Dinner Benchmark**: Complete inspection of the canonical showcase service (`meal-target-saturday-dinner`).
+- **Scanner Ingestion**: Interactive simulation of physical scanner sync (reconciling 99 resident check-ins).
+- **Kitchen Outcome Audit Form**: Domain-validated form capturing prepared servings, actual attendees, remaining unserved portions, and discarded food waste.
 
-4. **Aggregation & Recommendation**:
-   $$\text{Expected Diners} = \sum_{i=1}^{N} P(R_i)$$
-   $$\text{Recommended Servings} = \lceil \text{Expected Diners} \times (1 + \text{Buffer}) \rceil \quad (\text{Default buffer} = 5\%)$$
+### 4. Demand Predictions & Factor Architecture (`/MessMind/predictions/`)
+Transparent mathematical explanation of the prediction model.
+- **Mathematical Formula**: Clear visualization of individual resident probability calculations.
+- **Five Weighted Factor Cards**: Population-level breakdown of personal history, day pattern, meal type, 14-day trend, and preference opt-ins.
+- **Statistical Confidence**: Displays the dynamic Coefficient of Variation ($CV = 4.4\%$) and sample size rating.
+
+### 5. Analytics & Closed Learning Loop (`/MessMind/analytics/`)
+Macro-level evaluation of long-term model performance.
+- **Key Metrics**: 4.2% Mean Absolute Percentage Error (MAPE), 92.5% within $\pm 5\%$ tolerance, 2.6% physical waste across 205 historical meals.
+- **Leftover vs. Waste Separation**: Explicit tracking separating unserved remaining portions (5.6% average) from verified physical discarded waste (2.6%).
+- **Historical Distribution**: Interactive Recharts visualizations of residual errors and service-by-service accuracy.
+
+### 6. Hostel Administration & Governance (`/MessMind/admin/`)
+System governance, population cohort review, and access control policies.
+- **Resident Cohorts**: Inspection of the 125 active residents (50 student residents and 75 corporate residents).
+- **Algorithm Configuration**: Buffer percentage controls and high-waste risk threshold settings.
+- **Server Audit Policy**: Audit trail specifications tracking management overrides and synchronization actions.
 
 ---
 
-## 6. Amazon Bedrock Explanation Layer & Privacy
+## 4. Deterministic Prediction Methodology
 
-- **Bedrock is NEVER used for numerical prediction.** All numbers, diners, and buffer recommendations are calculated deterministically.
-- **Role**: Translating structured, aggregated factors into concise 1-2 sentence manager-friendly explanations.
-- **Converse API Integration**: Uses `@aws-sdk/client-bedrock-runtime` with standard credential provider chain (local AWS credentials or IAM execution roles).
-- **Privacy Boundary**:
-  Under no circumstances is resident PII transmitted to Bedrock. The payload is strictly limited to aggregated metrics:
+MessMind strictly separates **numerical prediction** from **textual explanation**. Numerical forecasts are 100% deterministic, reproducible, and explainable. No generative AI or large language model generates dining quantities or cooking recommendations.
+
+### 1. Individual Attendance Probability $P(R_i)$
+For each active resident $R_i$, an individual attendance probability is computed using five weighted behavioral components:
+
+$$\begin{aligned}
+P_{\text{raw}}(R_i) = &\; 0.40 \times P_{\text{hist}}(R_i) \\
+&+ 0.20 \times P_{\text{day}}(R_i, \text{day}) \\
+&+ 0.15 \times P_{\text{meal}}(R_i, \text{mealType}) \\
+&+ 0.15 \times P_{\text{trend}}(R_i, 14\text{d}) \\
+&+ 0.10 \times P_{\text{pref}}(R_i, \text{optIn})
+\end{aligned}$$
+
+### 2. Bounded Adjustments & Clamping
+- **Menu Appeal Adjustment**: Clamped strictly to $[-0.10, +0.10]$ based on historical attendance for the specific menu.
+- **Recent Trend Delta**: Bounded to $[-0.10, +0.10]$ to prevent short-term anomalies from skewing baseline expectations.
+- **Probability Clamping**: Every individual probability is bounded between $[0.01, 0.99]$:
+
+$$P(R_i) = \text{clamp}\Big(P_{\text{raw}}(R_i) \times (1 + \text{menuAdjustment}), \; 0.01, \; 0.99\Big)$$
+
+### 3. Aggregation & Recommended Cooking Servings
+Expected diners is the sum of individual probabilities. Recommended preparation applies the configurable kitchen safety buffer (default $5\%$):
+
+$$\text{Expected Diners} = \text{round}\left(\sum_{i=1}^{N} P(R_i)\right)$$
+
+$$\text{Recommended Servings} = \left\lceil \text{Expected Diners} \times (1 + \text{buffer}) \right\rceil$$
+
+### 4. Sparse-Data Fallback Hierarchy
+When resident history is limited, the engine falls back gracefully:
+1. **Full History**: Resident + Day + Meal + Menu history ($\ge 2$ observations).
+2. **Day/Meal Pattern**: Resident + Day + Meal history ($\ge 2$ observations).
+3. **Meal-Type Baseline**: Resident general attendance for that meal type ($\ge 3$ observations).
+4. **Cohort Population Baseline**: Fallback to student ($71\%$) or corporate ($69\%$) population baselines.
+
+### 5. Statistical Confidence Rating (Empirical CV)
+Confidence is calculated from actual historical variance across comparable services (e.g. past 12 Saturday Dinners):
+
+$$CV = \frac{\sigma}{\mu} = \frac{\sqrt{\frac{1}{M}\sum (D_j - \mu)^2}}{\mu}$$
+
+- **High Confidence**: $M \ge 10$ comparable meals and $CV < 0.20$ (e.g. Target Saturday Dinner has $CV = 4.4\%$).
+- **Medium Confidence**: $M \ge 5$ meals or $0.20 \le CV < 0.35$.
+- **Low Confidence**: $M < 5$ meals or high attendance dispersion.
+
+---
+
+## 5. Explainable AI & Privacy Boundaries
+
+MessMind incorporates an explainability layer to convert complex statistical factors into concise, 1–2 sentence operational summaries for kitchen managers.
+
+### Amazon Bedrock Converse API (Full-Stack Mode)
+In full-stack mode, MessMind can invoke Amazon Bedrock using the Converse API (`@aws-sdk/client-bedrock-runtime`).
+- **Strict Privacy Guarantee**: **Zero resident PII is ever transmitted to AWS.** Names, resident codes, room numbers, and individual attendance histories are never sent.
+- **Aggregate Payload Only**: Bedrock receives solely anonymized population-level rates:
   ```json
   {
+    "meal": "Saturday DINNER (Vegetable Biryani Special)",
     "expected_diners": 90,
     "historical_baseline": 86,
-    "recent_attendance_rate": 0.72,
-    "preference_intention_rate": 0.75,
-    "menu_adjustment": 1,
-    "trend_adjustment": 1,
+    "personal_history_factor": 71,
+    "day_of_week_factor": 71,
+    "recent_attendance_trend": 72,
+    "preference_intention_factor": 75,
+    "menu_adjustment": 3,
     "confidence": "HIGH",
-    "cv": 4.4,
-    "meal_type": "DINNER",
-    "day": "Saturday"
+    "cv": 4.4
   }
   ```
-- **Resilient Fallback**: If Bedrock is unconfigured, disabled, or unreachable, MessMind automatically generates a deterministic natural language explanation without degrading application functionality.
-- **Explanation Caching**: Generated explanations are cached to PostgreSQL so repeated page loads do not invoke the Bedrock API unnecessarily.
+- **Caching**: Generated explanations are cached in the PostgreSQL `predictions` table to prevent redundant API calls.
+
+### Pure Deterministic Browser Explainer (Static Demo Mode)
+In static demo mode and whenever Bedrock is unconfigured or unreachable, MessMind automatically uses its **deterministic template explainer** (`src/modules/ai/deterministic-explainer.ts`).
+- Generates professional, driver-focused summaries (e.g., *"Demand is expected to be 90 diners, slightly above the historical baseline of 86. Recent attendance momentum, current meal preferences and historical menu popularity are contributing to the increase."*).
+- **Makes zero external network calls, requires zero cloud credentials, and executes in 0.04ms.**
 
 ---
 
-## 7. Security & Role-Based Authorization
+## 6. Synthetic Data & Simulation Disclosures
 
-1. **Server-Side Enforcement**: The frontend role switch (`MESS_MANAGER` vs `HOSTEL_ADMIN`) is a development preview tool. All protected server actions and API routes enforce authorization server-side via `requireServerRole()`.
-2. **Student Isolation**: Students have zero access to MessMind management dashboards; they interact solely with the resident hostel app.
-3. **Client-Side Safety**: Zero AWS credentials, database secrets, or resident PII are exposed to client-side bundles.
-4. **Audit Logging**: Sensitive actions (scanner sync, outcome recording, recalculation) are recorded to the `audit_logs` table.
+To maintain academic and professional transparency, all demonstration figures are synthetic:
+
+> **SIMULATION NOTICE**<br />
+> All resident records, attendance histories, scan timestamps, and waste audits represent a **synthetic demonstration dataset**. They do not reflect real-world individuals, physical hostel facilities, or actual student populations.
+
+### Verified Benchmark Data
+
+| Benchmark Metric | Canonical Value | Operational Definition |
+| :--- | :---: | :--- |
+| **Synthetic Residents** | **125** | Total registered residents in hostel directory |
+| **Resident Breakdown** | **50 Students / 75 Corporate** | Two distinct behavioral archetypes |
+| **Historical Evaluation Window** | **90 Days** | Duration of historical learning records |
+| **Evaluated Historical Meals** | **205 Meals** | Complete historical dataset used for accuracy evaluation |
+| **Displayed Timeline Entries** | **21 Meals** | Active 7-day operational schedule visible in timeline |
+| **Target Saturday Dinner Forecast** | **90 Diners** | Sum of individual attendance probabilities ($\sum P(R_i)$) |
+| **Target Recommended Preparation** | **95 Servings** | Expected diners (90) + 5% default safety buffer |
+| **Target Historical Baseline** | **86 Diners** | 12-week historical average for Saturday Dinner |
+| **Model Accuracy (MAPE)** | **4.2%** | Mean Absolute Percentage Error across 205 evaluated meals |
+| **Accuracy Within $\pm 5\%$** | **92.5%** | Percentage of services where error was $\le 5\%$ |
+| **Average Physical Food Waste** | **2.6%** | Discarded food waste verified by physical kitchen audits |
+| **Saturday Dinner Physical Waste** | **2.8%** | 12-week average physical waste for comparable Saturday Dinners |
+| **Average Unconsumed Leftovers** | **5.6%** | Unserved portions remaining in kitchen vessels |
+
+### In-Memory State Persistence
+- **Client Role Selector**: Selected role (`MESS_MANAGER` or `HOSTEL_ADMIN`) is saved in browser `localStorage` (`messmind_demo_role`).
+- **Simulation State**: Simulated entrance scans (99 check-ins), safety buffer overrides, and logged kitchen waste audits are managed in-memory via React external stores (`useSyncExternalStore`). **They reside solely within the active browser session and reset to initial benchmark values upon browser page reload.**
 
 ---
 
-## 8. Local Development Setup
+## 7. Local Development Instructions
 
 ### Prerequisites
-- Node.js (v18+ or v20+)
-- npm (v9+)
-- PostgreSQL (local instance or Docker)
-
-### Installation
-1. Clone the repository and install dependencies:
-   ```bash
-   npm install
-   ```
-2. Configure environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-3. Generate the Prisma Client:
-   ```bash
-   npm run db:generate
-   ```
-4. Push database schema & seed synthetic demo dataset:
-   ```bash
-   npm run db:push
-   npm run db:seed
-   ```
-5. Run unit & integration tests:
-   ```bash
-   npm test
-   ```
-6. Start the development server:
-   ```bash
-   npm run dev
-   ```
-   Open [http://localhost:3000](http://localhost:3000) to access MessMind.
+- **Node.js**: v20.x or higher
+- **npm**: v10.x or higher
+- *(Optional for Full-Stack Mode)*: Docker or a local PostgreSQL 16 instance
 
 ---
 
-## 9. Current Implementation Status
+### Option A: Static Demo Mode (Zero Database Required)
+Run the complete interactive demo locally without PostgreSQL, Prisma, Docker, or AWS credentials:
 
-| Component | Status | Details |
-| :--- | :--- | :--- |
-| **Architecture** | **Complete** | Modular monolith with typed domain modules and server actions |
-| **Database Schema** | **Complete** | Full Prisma models for residents, meals, scans, outcomes, and audit logs |
-| **Prediction Engine** | **Complete** | Deterministic 5-factor calculation with bounded multipliers and 47 tests |
-| **Scanner Attendance** | **Complete** | Scanner integration abstraction with duplicate suppression and reconciliation |
-| **AI Explanation** | **Complete** | Amazon Bedrock Converse API integration with deterministic fallback & caching |
-| **Visual Interface** | **Complete** | 5 operational views with responsive layout and real-time scan simulation |
-| **Demo Replay** | **Complete** | Non-destructive reset server action for deterministic showcase repeatability |
+```bash
+# 1. Clone the repository
+git clone https://github.com/MohdUmair015/MessMind.git
+cd MessMind
+
+# 2. Install dependencies from lockfile
+npm ci
+
+# 3. Generate Prisma client types (needed for TypeScript compilation)
+npx prisma generate
+
+# 4. Start the demo development server
+npm run dev:demo
+```
+Open **[http://localhost:3000](http://localhost:3000)** in your browser. The server automatically routes requests to `/MessMind/`.
 
 ---
 
-## 10. AWS Deployment Architecture (Production Target)
+### Option B: Full-Stack Mode (PostgreSQL + Prisma)
+Run the full-stack version with persistent database storage and server actions:
 
-1. **Compute & Frontend**: Deploy the Next.js application to **AWS Amplify Hosting**.
-2. **Database**: Provision **Amazon RDS for PostgreSQL**.
-3. **AI Explanation**: Enable an Amazon Bedrock foundation model (e.g. `amazon.nova-micro-v1:0` or `anthropic.claude-3-haiku-20240307-v1:0`) in the AWS region.
-4. **IAM Role**: Attach `bedrock:InvokeModel` permissions to the hosting compute environment execution role.
+```bash
+# 1. Start local PostgreSQL via Docker Compose
+docker compose up -d
 
+# 2. Configure environment variables
+cp .env.example .env
+# Edit .env and ensure DATABASE_URL matches your PostgreSQL credentials:
+# DATABASE_URL="postgresql://postgres:postgres@localhost:5432/messmind?schema=public"
+
+# 3. Push schema to database
+npm run db:push
+
+# 4. Seed 90-day synthetic dataset (125 residents, 205 meals)
+npm run db:seed
+
+# 5. Start standard development server
+npm run dev
+```
+
+---
+
+## 8. Automated Testing & Verification
+
+MessMind maintains a comprehensive automated test suite.
+
+### 1. Zero-Database Demo Regression Suite (60 Tests)
+To execute the database-independent verification suite:
+
+```bash
+npm run test:demo
+```
+
+This executes **60 automated tests** across three core modules:
+- `src/modules/prediction/__tests__/deterministic-engine.test.ts` (**11 tests**): Validates attendance probability weights, bounded multipliers, sparse fallback hierarchies, dynamic CV calculation, and deterministic repeatability.
+- `src/modules/demo-data/__tests__/demo-data.test.ts` (**35 tests**): Validates snapshot benchmark values, pure deterministic engine execution, dependency isolation (zero database imports), read APIs, and mathematical parity with the original database engine.
+- `src/modules/demo/__tests__/demo-simulation.test.ts` (**14 tests**): Validates in-memory simulation controller, scan ingestion, safety buffer recalculations, domain outcome form validation, truthful scanner indicators, and static export redirect safety.
+
+### 2. Full Test Suite (Full-Stack Integration)
+```bash
+# Runs all unit and database integration tests (requires running PostgreSQL)
+npm test
+```
+
+### 3. TypeScript Type Safety Check
+```bash
+npx tsc --noEmit
+```
+
+### 4. Static Production Build Verification
+```bash
+npm run build:static
+```
+
+---
+
+## 9. GitHub Pages Static Build & CI/CD Pipeline
+
+The static demonstration build for GitHub Pages is configured in Next.js and automated via GitHub Actions:
+
+- **Next.js Configuration**: Configured with `output: "export"`, `basePath: "/MessMind"`, and `trailingSlash: true` when `NEXT_PUBLIC_DEMO_MODE=true`.
+- **Pre-Rendered Output**: Generates **30 static HTML pages** into `./out/` (including all 21 meal routes and a branded `404.html`).
+- **Zero Redirect Dependency**: In static export mode, server-side redirects are omitted entirely to prevent runtime 404s on static CDNs.
+
+### GitHub Actions Workflow (`.github/workflows/static-demo.yml`)
+> **Workflow Presence Notice**:<br />
+> The workflow file `.github/workflows/static-demo.yml` is currently prepared and verified in the **local working tree** (uncommitted). It is **not yet present on `origin/main`**, meaning GitHub is not currently executing these jobs remotely. Once committed and pushed in a future publication step, it will operate according to the following design:
+
+1. **Automated Build & Verify Job (`build`)**: Runs on every `push` and `pull_request` to `main`. It installs dependencies (`npm ci`), runs all 60 regression tests, executes `npm run build:static`, validates the `./out` artifact, and uploads a downloadable inspection artifact (`messmind-static-build`). **Zero deployment is performed automatically on code changes.**
+2. **Manual Deploy Job (`deploy`)**: Dormant by default. Runs **only when manually dispatched** through GitHub Actions with `deploy: true` after the workflow is pushed to the remote repository and repository settings (GitHub Actions as Pages source) are configured by an administrator.
+
+---
+
+## 10. Database Schema & Full-Stack Reference
+
+In full-stack mode, data is modeled via Prisma (`prisma/schema.prisma`):
+
+```text
+┌──────────────┐       1:N       ┌────────────────┐       N:1       ┌──────────────┐
+│   Resident   │────────────────<│ MealPreference │>────────────────│     Meal     │
+└──────┬───────┘                 └────────────────┘                 └──────┬───────┘
+       │                                                                   │
+       │ 1:N                     ┌────────────────┐                        │ 1:1
+       └────────────────────────<│    MealScan    │>───────────────────────┤
+                                 └────────────────┘                        │
+                                                                           ├─ 1:1 ── [ Prediction ]
+                                                                           ├─ 1:1 ── [ MealOutcome ]
+                                                                           └─ N:1 ── [ Menu ]
+```
+
+- **`Resident`**: Tracks resident code, type (`STUDENT`, `CORPORATE`), and status (`ACTIVE`, `INACTIVE`, `ON_LEAVE`).
+- **`Menu`**: Meal offerings with category and JSON array of dishes.
+- **`Meal`**: Scheduled service by date and type (`BREAKFAST`, `LUNCH`, `DINNER`).
+- **`MealPreference`**: Pre-meal resident opt-ins (`REGULAR`, `OPT_OUT`, etc.) used as intention signals.
+- **`MealScan`**: Authoritative timestamped physical scan check-ins captured at dining entrance.
+- **`MealOutcome`**: Verified kitchen metrics: prepared servings, actual attendees, remaining portions, and discarded food waste.
+- **`Prediction`**: Predicted diners, recommended servings, waste risk (`LOW`, `MEDIUM`, `HIGH`), confidence rating, JSON prediction factors, and cached explanation text.
+- **`PredictionSetting`**: Configurable buffer percentage (default 5%) and risk thresholds.
+- **`AuditLog`**: Immutable server-side audit trail for administrative actions and sync events.
+
+---
+
+## 11. License & Project Disclosures
+
+- **Project Status**: Academic and technical demonstration prototype.
+- **Production Readiness**: This repository is designed to demonstrate predictive kitchen intelligence, explainable forecasting, and closed-loop learning. Deploying to real-world commercial kitchens requires integration with authorized hostel dining hardware, certified food-safety recording protocols, and local infrastructure provisioning.
+- **Licensing Status**: No standalone repository license is currently provided. You should not assume permission to reuse, modify, or redistribute this project's original materials. Third-party dependencies remain subject to their respective licenses.

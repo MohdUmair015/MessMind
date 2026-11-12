@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
-import { syncMealAttendanceAction, simulateScannerSyncAction, resetMealDemoScansAction } from "@/app/actions/meal-actions";
+import { useDemo } from "@/modules/demo";
 import { StatusRing } from "@/components/ui/StatusRing";
 import { QrCode, RefreshCw, RotateCcw, Loader2, CheckCircle2, AlertCircle, Sparkles, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,28 +25,42 @@ export function LiveScannerWidget({
   duplicateScansCount,
   className,
 }: LiveScannerWidgetProps) {
+  const { isDemoMode, demo } = useDemo();
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [scansCount, setScansCount] = useState<number>(initialScansCount);
+  const [localScansCount, setLocalScansCount] = useState<number>(initialScansCount);
 
   React.useEffect(() => {
-    setScansCount(initialScansCount);
+    setLocalScansCount(initialScansCount);
   }, [initialScansCount]);
 
-  const hasScans = scansCount > 0;
-  const variance = hasScans ? scansCount - predictedDiners : null;
-  const percentOfForecast = hasScans && predictedDiners > 0
-    ? Math.round((scansCount / predictedDiners) * 100)
+  // Use shared reactive demo state in static demo mode, fallback to local state in full-stack mode
+  const effectiveScansCount = demo?.isDemoMode ? demo.scannerState.uniqueScansCount : localScansCount;
+  const effectiveDuplicateCount = demo?.isDemoMode ? demo.scannerState.duplicateScansCount : duplicateScansCount;
+  const effectivePredicted = demo?.isDemoMode ? demo.prediction.predictedDiners : predictedDiners;
+
+  const hasScans = effectiveScansCount > 0;
+  const variance = hasScans ? effectiveScansCount - effectivePredicted : null;
+  const percentOfForecast = hasScans && effectivePredicted > 0
+    ? Math.round((effectiveScansCount / effectivePredicted) * 100)
     : null;
 
   const handleFetchScans = () => {
     setFeedback(null);
     setErrorMessage(null);
     startTransition(async () => {
+      if (demo?.isDemoMode) {
+        const res = demo.syncScanner();
+        setFeedback(res.message);
+        return;
+      }
+
+      // Dynamic import in full-stack mode keeps the static demo path 100% free of server actions
+      const { syncMealAttendanceAction } = await import("@/app/actions/meal-actions");
       const res = await syncMealAttendanceAction(mealId);
       if (res.success && res.reconciliation) {
-        setScansCount(res.reconciliation.uniqueScansCount);
+        setLocalScansCount(res.reconciliation.uniqueScansCount);
         setFeedback(`Synchronized ${res.reconciliation.uniqueScansCount} scans from hostel scanner.`);
       } else {
         setErrorMessage(res.error || "Failed to fetch scanner entries.");
@@ -58,9 +72,19 @@ export function LiveScannerWidget({
     setFeedback(null);
     setErrorMessage(null);
     startTransition(async () => {
+      if (demo?.isDemoMode) {
+        const res = demo.simulateScans(99);
+        setFeedback(
+          `Reconciled ${res.scannedCount} unique scans from dining scanner automatically (+${res.variance} above forecast, ${res.forecastError}% forecast error).`
+        );
+        return;
+      }
+
+      // Dynamic import in full-stack mode keeps the static demo path 100% free of server actions
+      const { simulateScannerSyncAction } = await import("@/app/actions/meal-actions");
       const res = await simulateScannerSyncAction(mealId, 99);
       if (res.success && typeof res.scannedCount === "number") {
-        setScansCount(res.scannedCount);
+        setLocalScansCount(res.scannedCount);
         setFeedback(`Reconciled ${res.scannedCount} unique scans from dining scanner automatically.`);
       } else {
         setErrorMessage(res.error || "Failed to simulate scans.");
@@ -72,9 +96,17 @@ export function LiveScannerWidget({
     setFeedback(null);
     setErrorMessage(null);
     startTransition(async () => {
+      if (demo?.isDemoMode) {
+        demo.resetSimulation();
+        setFeedback("Reset demo to initial pre-service state (0 scans).");
+        return;
+      }
+
+      // Dynamic import in full-stack mode keeps the static demo path 100% free of server actions
+      const { resetMealDemoScansAction } = await import("@/app/actions/meal-actions");
       const res = await resetMealDemoScansAction(mealId);
       if (res.success) {
-        setScansCount(0);
+        setLocalScansCount(0);
         setFeedback("Reset demo to initial pre-service state (0 scans).");
       } else {
         setErrorMessage(res.error || "Failed to reset demo.");
@@ -98,7 +130,7 @@ export function LiveScannerWidget({
           </div>
 
           <span className="text-xs font-semibold text-charcoal-600 bg-cream-100 px-3 py-0.5 rounded-full border border-surface-border/70 shrink-0">
-            Synced from Hostel App
+            {isDemoMode ? "Simulated Scanner Feed" : "Synced from Hostel App"}
           </span>
         </div>
 
@@ -122,13 +154,13 @@ export function LiveScannerWidget({
             {/* Status Ring - centered */}
             <div className="w-full flex justify-center py-1 shrink-0">
               <StatusRing
-                current={scansCount}
-                total={predictedDiners}
+                current={effectiveScansCount}
+                total={effectivePredicted}
                 size={144}
                 strokeWidth={11}
                 label="residents"
-                sublabel={`of ${predictedDiners} expected`}
-                color={scansCount >= predictedDiners ? "mint" : "coral"}
+                sublabel={`of ${effectivePredicted} expected`}
+                color={effectiveScansCount >= effectivePredicted ? "mint" : "coral"}
               />
             </div>
 
@@ -142,10 +174,10 @@ export function LiveScannerWidget({
 
               <div>
                 <h4 className="text-xl sm:text-2xl font-black text-charcoal-950 tracking-tight break-words">
-                  {scansCount} Unique Residents
+                  {effectiveScansCount} Unique Residents
                 </h4>
                 <p className="text-xs text-charcoal-600 mt-0.5 leading-relaxed break-words">
-                  Checked in at dining entrance of {predictedDiners} expected diners.
+                  Checked in at dining entrance of {effectivePredicted} expected diners.
                 </p>
               </div>
             </div>
@@ -154,15 +186,17 @@ export function LiveScannerWidget({
             <div className="p-3.5 rounded-2xl bg-cream-50/70 border border-surface-border/60 space-y-1.5 text-xs text-charcoal-600 w-full">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-mint-600 shrink-0" />
-                <span className="font-semibold text-charcoal-800 break-words">Authoritative hostel app scanner data</span>
+                <span className="font-semibold text-charcoal-800 break-words">
+                  {demo?.scannerState.isSimulated ? "Simulated dining scanner verification" : "Authoritative hostel app scanner data"}
+                </span>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-charcoal-500">
                 <Radio className="w-3 h-3 text-mint-500 shrink-0 animate-pulse" />
                 <span>Zero manual attendance entry required</span>
               </div>
-              {duplicateScansCount > 0 && (
+              {effectiveDuplicateCount > 0 && (
                 <div className="text-[11px] text-charcoal-400 pl-5.5">
-                  {duplicateScansCount} re-entry duplicate suppressed
+                  {effectiveDuplicateCount} re-entry duplicate suppressed
                 </div>
               )}
             </div>

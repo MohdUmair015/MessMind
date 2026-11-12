@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
-import { syncMealAttendanceAction, simulateScannerSyncAction } from "@/app/actions/meal-actions";
+import { useDemo } from "@/modules/demo";
 import { RefreshCw, QrCode, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 interface SyncScannerButtonProps {
@@ -15,6 +15,7 @@ export function SyncScannerButton({
   hasScans,
   uniqueScansCount,
 }: SyncScannerButtonProps) {
+  const { demo } = useDemo();
   const [isPending, startTransition] = useTransition();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -23,6 +24,14 @@ export function SyncScannerButton({
     setStatusMessage(null);
     setErrorMessage(null);
     startTransition(async () => {
+      if (demo?.isDemoMode) {
+        const res = demo.syncScanner();
+        setStatusMessage(res.message);
+        return;
+      }
+
+      // Dynamic import keeps the static demo path 100% decoupled from server actions
+      const { syncMealAttendanceAction } = await import("@/app/actions/meal-actions");
       const res = await syncMealAttendanceAction(mealId);
       if (res.success && res.reconciliation) {
         setStatusMessage(
@@ -38,6 +47,16 @@ export function SyncScannerButton({
     setStatusMessage(null);
     setErrorMessage(null);
     startTransition(async () => {
+      if (demo?.isDemoMode) {
+        const res = demo.simulateScans(99);
+        setStatusMessage(
+          `Demo Scanner Feed: ${res.scannedCount} dining scans recorded and reconciled (+${res.variance} above forecast)!`
+        );
+        return;
+      }
+
+      // Dynamic import keeps the static demo path 100% decoupled from server actions
+      const { simulateScannerSyncAction } = await import("@/app/actions/meal-actions");
       const res = await simulateScannerSyncAction(mealId, 99);
       if (res.success) {
         setStatusMessage("Demo Scanner Feed: 99 dining scans recorded and reconciled automatically!");
@@ -68,14 +87,18 @@ export function SyncScannerButton({
           onClick={handleFetchScans}
           disabled={isPending}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-cream-100 text-charcoal-800 text-xs font-bold rounded-2xl border border-surface-border shadow-2xs transition-colors disabled:opacity-50 cursor-pointer"
-          title="Fetch authoritative meal scans from the hostel dining scanner integration"
+          title={
+            demo?.isDemoMode
+              ? "Reconcile dining scans with prediction using simulated scanner integration"
+              : "Fetch authoritative meal scans from the hostel dining scanner integration"
+          }
         >
           {isPending ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin text-coral-500" />
           ) : (
             <RefreshCw className="w-3.5 h-3.5 text-charcoal-500" />
           )}
-          <span>Fetch Hostel Scans</span>
+          <span>{demo?.isDemoMode ? "Reconcile Demo Scans" : "Fetch Hostel Scans"}</span>
         </button>
 
         <button

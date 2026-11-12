@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 export default function AdminPage() {
+  const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
   const { currentRole, isAdmin, setRole } = useDemoAuth();
   const [activeTab, setActiveTab] = useState<"governance" | "residents" | "algorithm" | "security">("governance");
 
@@ -265,7 +266,9 @@ export default function AdminPage() {
                   Server-Side Audit Trail Policy
                 </h3>
                 <p className="text-xs text-charcoal-600 mt-0.5">
-                  Immutable PostgreSQL records tracking every management action and scanner reconciliation
+                  {isDemo
+                    ? "Simulated audit trail tracking every management action and scanner reconciliation"
+                    : "Immutable PostgreSQL records tracking every management action and scanner reconciliation"}
                 </p>
               </div>
               <Badge variant="charcoal" size="xs">

@@ -33,3 +33,6 @@ prisma/*.db-journal
 # IDE
 .vscode/
 .idea/
+
+# TypeScript
+tsconfig.tsbuildinfo

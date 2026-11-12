@@ -4,13 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:demo": "NEXT_PUBLIC_DEMO_MODE=true next dev",
     "build": "next build",
+    "build:static": "NEXT_PUBLIC_DEMO_MODE=true next build",
     "start": "next start",
     "lint": "next lint",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
-    "test": "tsx --test --test-concurrency=1 src/modules/**/__tests__/*.test.ts"
+    "test": "tsx --test --test-concurrency=1 src/modules/**/__tests__/*.test.ts",
+    "test:demo": "tsx --test src/modules/prediction/__tests__/deterministic-engine.test.ts src/modules/demo-data/__tests__/demo-data.test.ts src/modules/demo/__tests__/demo-simulation.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
